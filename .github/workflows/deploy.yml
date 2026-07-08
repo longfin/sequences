@@ -25,7 +25,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit
-      - run: npx vite build --base=/sequences/
+      - run: npx vite build
+      # custom domain (sequences.kelupus.com) serves from the site root,
+      # so no --base path; the CNAME file keeps the domain across deploys
+      - run: echo "sequences.kelupus.com" > dist/CNAME
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

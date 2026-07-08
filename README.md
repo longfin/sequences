@@ -7,7 +7,7 @@ through the result like a printed dummy.
 
 Everything stays in your browser (IndexedDB). No server, no uploads.
 
-**Try it now → [longfin.github.io/sequences](https://longfin.github.io/sequences/)**
+**Try it now → [sequences.kelupus.com](https://sequences.kelupus.com/)**
 
 *[한국어 안내는 아래에 있습니다.](#한국어)*
 
