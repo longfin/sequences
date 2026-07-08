@@ -71,6 +71,35 @@ const messages = {
   },
   addSpread: { ko: '스프레드 추가', en: 'Add spread', ja: '見開きを追加' },
   close: { ko: '닫기 (Esc)', en: 'Close (Esc)', ja: '閉じる (Esc)' },
+  file: { ko: '파일', en: 'File', ja: 'ファイル' },
+  saveProject: { ko: '프로젝트 저장', en: 'Save project', ja: 'プロジェクトを保存' },
+  loadProject: { ko: '프로젝트 불러오기', en: 'Load project', ja: 'プロジェクトを読み込む' },
+  reset: { ko: '리셋', en: 'Reset', ja: 'リセット' },
+  resetConfirm: {
+    ko: '모든 사진과 시퀀스를 삭제하고 처음부터 시작할까요?',
+    en: 'Delete all photos and spreads and start over?',
+    ja: 'すべての写真とシーケンスを削除して最初からやり直しますか？',
+  },
+  loadConfirm: {
+    ko: '현재 작업을 불러온 프로젝트로 교체할까요?',
+    en: 'Replace the current work with the loaded project?',
+    ja: '現在の作業を読み込んだプロジェクトで置き換えますか？',
+  },
+  savingFile: {
+    ko: '저장 파일 생성 중… {done}/{total}',
+    en: 'Preparing save file… {done}/{total}',
+    ja: '保存ファイル作成中… {done}/{total}',
+  },
+  loadingFile: {
+    ko: '프로젝트 불러오는 중… {done}/{total}',
+    en: 'Loading project… {done}/{total}',
+    ja: 'プロジェクト読み込み中… {done}/{total}',
+  },
+  invalidFile: {
+    ko: 'Sequences 프로젝트 파일이 아닙니다.',
+    en: 'Not a valid Sequences project file.',
+    ja: 'Sequencesのプロジェクトファイルではありません。',
+  },
   prev: { ko: '← 이전', en: '← Prev', ja: '← 前へ' },
   next: { ko: '다음 →', en: 'Next →', ja: '次へ →' },
 } satisfies Record<string, Record<Locale, string>>

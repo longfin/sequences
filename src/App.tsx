@@ -16,6 +16,7 @@ import {
 } from './i18n'
 import { importFile, isImageFile } from './images'
 import { exportPdf } from './pdf'
+import { buildProjectFile, parseProjectFile } from './projectFile'
 import type { PhotoMap, PhotoView } from './photoStore'
 import {
   PAGE_RATIOS,
@@ -34,6 +35,8 @@ export default function App() {
   const [view, setView] = useState<View>('edit')
   const [previewStart, setPreviewStart] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const projectFileInput = useRef<HTMLInputElement>(null)
   const [locale, setLocaleState] = useState<Locale>(detectLocale)
 
   const t = useCallback(
@@ -246,6 +249,76 @@ export default function App() {
     }, 0)
   }
 
+  // ---- file menu: save / load / reset ----
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = () => setMenuOpen(false)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [menuOpen])
+
+  function replacePhotoViews(records: { id: string; name: string; width: number; height: number; thumb: Blob }[]) {
+    setPhotos((prev) => {
+      for (const p of prev.values()) URL.revokeObjectURL(p.thumbUrl)
+      const next: PhotoMap = new Map()
+      for (const r of records) {
+        next.set(r.id, {
+          id: r.id,
+          name: r.name,
+          width: r.width,
+          height: r.height,
+          thumbUrl: URL.createObjectURL(r.thumb),
+        })
+      }
+      return next
+    })
+  }
+
+  async function handleSaveProject() {
+    if (!project) return
+    setBusy(t('savingFile', { done: 0, total: photos.size }))
+    try {
+      const records = await db.loadPhotos()
+      const blob = await buildProjectFile(project, records, (done, total) =>
+        setBusy(t('savingFile', { done, total })),
+      )
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `sequences-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleLoadProject(file: File) {
+    if (!window.confirm(t('loadConfirm'))) return
+    setBusy(t('loadingFile', { done: 0, total: '?' }))
+    try {
+      const parsed = await parseProjectFile(file, (done, total) =>
+        setBusy(t('loadingFile', { done, total })),
+      )
+      await db.clearAll()
+      for (const rec of parsed.photos) await db.savePhoto(rec)
+      replacePhotoViews(parsed.photos)
+      setProject(parsed.project)
+    } catch (err) {
+      console.error(err)
+      alert(t('invalidFile'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleReset() {
+    if (!window.confirm(t('resetConfirm'))) return
+    await db.clearAll()
+    replacePhotoViews([])
+    setProject(defaultProject())
+  }
+
   // ---- export ----
 
   async function handleExportPdf() {
@@ -296,6 +369,58 @@ export default function App() {
             </option>
           ))}
         </select>
+        <div className="menu-wrap">
+          <button
+            className={menuOpen ? 'active' : ''}
+            onClick={(e) => {
+              e.stopPropagation()
+              setMenuOpen((o) => !o)
+            }}
+          >
+            {t('file')} ▾
+          </button>
+          {menuOpen && (
+            <div className="menu" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => {
+                  setMenuOpen(false)
+                  handleSaveProject()
+                }}
+              >
+                {t('saveProject')}
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false)
+                  projectFileInput.current?.click()
+                }}
+              >
+                {t('loadProject')}
+              </button>
+              <div className="menu-sep" />
+              <button
+                className="danger"
+                onClick={() => {
+                  setMenuOpen(false)
+                  handleReset()
+                }}
+              >
+                {t('reset')}
+              </button>
+            </div>
+          )}
+          <input
+            ref={projectFileInput}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleLoadProject(f)
+              e.target.value = ''
+            }}
+          />
+        </div>
         <div className="toolbar-spacer" />
         {busy && (
           <span className="busy">

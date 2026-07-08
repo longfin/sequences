@@ -43,6 +43,11 @@ export async function deletePhoto(id: string): Promise<void> {
   await db.delete('photos', id)
 }
 
+export async function clearAll(): Promise<void> {
+  const db = await getDB()
+  await Promise.all([db.clear('photos'), db.clear('project')])
+}
+
 export async function getPhotoBlob(id: string): Promise<Blob | undefined> {
   const db = await getDB()
   const rec: PhotoRecord | undefined = await db.get('photos', id)

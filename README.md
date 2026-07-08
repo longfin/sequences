@@ -36,6 +36,8 @@ Sequences keeps you in spreads the whole time.
 - **Local persistence** — photos and sequence live in IndexedDB and survive
   reloads. Original files are kept at full resolution for export; the UI uses
   generated thumbnails.
+- **Save / load / reset** — export the whole project (sequence + photos) as a
+  single file, load it back on any machine, or wipe everything and start over.
 - **i18n** — Korean, English, Japanese (auto-detected, switchable).
 
 | Spread editor | Flip preview |
@@ -79,6 +81,8 @@ Built with React + TypeScript + Vite. Photos never leave the browser.
 - **넘겨보기** — 3D 책장 넘김 프리뷰. 편집 중이던 위치에서 시작합니다.
 - **PDF 내보내기** — 스프레드 단위 PDF로 프린트 더미북 제작.
 - **로컬 저장** — 새로고침해도 유지. 내보내기는 원본 해상도 사용.
+- **저장/불러오기/리셋** — 프로젝트 전체(시퀀스+사진)를 파일 하나로 저장하고
+  다른 기기에서 불러오거나, 전부 지우고 새로 시작.
 - **다국어** — 한국어 / English / 日本語.
 
 ### 실행
