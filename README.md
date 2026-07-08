@@ -15,10 +15,11 @@ Everything stays in your browser (IndexedDB). No server, no uploads.
 
 ## Why
 
-Sequencing is usually done by taping work prints to a wall. Existing tools are
-either full layout suites (InDesign, Lightroom Book) or generic whiteboards —
-neither shows the one thing that matters: **the two pages facing each other**.
-Sequences keeps you in spreads the whole time.
+Layout suites like InDesign show you spreads too — along with documents,
+master pages, styles, and everything else you don't need yet. At the
+sequencing stage all you want is to put pictures on pages and look at them.
+Sequences is exactly that much: open a tab, drag photos on, shuffle until the
+flow reads right. Nothing to install, nothing to set up.
 
 ## Features
 
