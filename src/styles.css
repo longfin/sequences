@@ -253,6 +253,13 @@ button {
 
 /* ---------- spread strip ---------- */
 
+.strip-wrap {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  display: flex;
+}
+
 .spread-strip {
   flex: 1;
   display: flex;
@@ -267,7 +274,49 @@ button {
 
 .spread-card {
   flex: 0 0 auto;
-  width: min(640px, 82vw);
+  width: min(var(--card-w, 640px), 92vw);
+}
+
+.zoom-control {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 2px;
+  box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.5);
+}
+
+.zoom-control button {
+  border: none;
+  background: none;
+  color: var(--text);
+  width: 26px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.zoom-control button:hover:not(:disabled) {
+  background: var(--line);
+}
+
+.zoom-control button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.zoom-control .zoom-value {
+  width: auto;
+  padding: 0 7px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
 }
 
 .spread-card.reorder-over {
@@ -375,7 +424,7 @@ button {
 
 .add-spread {
   flex: 0 0 auto;
-  width: min(640px, 82vw);
+  width: min(var(--card-w, 640px), 92vw);
   height: 60px;
   border-radius: 4px;
   border: 1px dashed var(--line-strong);
