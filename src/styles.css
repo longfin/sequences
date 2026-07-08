@@ -674,7 +674,7 @@ img.page-img:active {
   flex: 1;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--ov-w, 200px), 88vw), 1fr));
   gap: 26px 20px;
   padding: 28px 48px;
   align-content: start;
