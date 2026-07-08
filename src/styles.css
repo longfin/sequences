@@ -79,7 +79,8 @@ button {
 
 /* grayscale viewing mode desaturates every photo */
 .app.grayscale img.page-img,
-.app.grayscale .tray-photo img {
+.app.grayscale .tray-photo img,
+.app.grayscale .flip-book canvas {
   filter: grayscale(1);
 }
 
@@ -742,11 +743,23 @@ img.page-img:active {
   color: var(--text);
 }
 
-.preview-spread {
+/* ---- realistic page-turn book (StPageFlip, canvas renderer) ----
+   Pages are pre-rendered to bitmaps and the whole book — fold, curl,
+   shadows — is drawn inside a single <canvas>. */
+
+.flip-book {
+  touch-action: none;
+  user-select: none;
+}
+
+/* the whole spread reads as one printed object resting in the dark room */
+.flip-book canvas {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6), 0 32px 80px -16px rgba(0, 0, 0, 0.8);
-  animation: pagein 0.35s ease;
-  perspective: 2600px;
-  overflow: visible;
+  cursor: grab;
+}
+
+.flip-book canvas:active {
+  cursor: grabbing;
 }
 
 @keyframes pagein {
@@ -758,105 +771,6 @@ img.page-img:active {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* ---- page-turn leaf ---- */
-
-.flip-leaf {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 50%;
-  transform-style: preserve-3d;
-  z-index: 4;
-  will-change: transform;
-}
-
-.flip-leaf.fwd {
-  right: 0;
-  transform-origin: left center;
-  animation: turn-fwd 0.6s cubic-bezier(0.4, 0.05, 0.3, 1) forwards;
-}
-
-.flip-leaf.bwd {
-  left: 0;
-  transform-origin: right center;
-  animation: turn-bwd 0.6s cubic-bezier(0.4, 0.05, 0.3, 1) forwards;
-}
-
-@keyframes turn-fwd {
-  to {
-    transform: rotateY(-180deg);
-  }
-}
-
-@keyframes turn-bwd {
-  to {
-    transform: rotateY(180deg);
-  }
-}
-
-.leaf-face {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  overflow: hidden;
-  backface-visibility: hidden;
-  background: linear-gradient(105deg, var(--paper) 0%, #efece6 100%);
-}
-
-.leaf-face.back {
-  transform: rotateY(180deg);
-}
-
-/* the leaf dims as it passes through the vertical */
-.leaf-face::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: #2a2418;
-  opacity: 0;
-  pointer-events: none;
-  animation: leaf-shade 0.6s ease-in-out;
-}
-
-@keyframes leaf-shade {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  50% {
-    opacity: 0.16;
-  }
-}
-
-/* In the preview each page carries its own spine-side crease shadow, so
-   the shadow travels with the turning leaf instead of popping back in
-   when the leaf lands (the pages inside leaf faces get it for free). */
-.preview-page::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 2;
-}
-
-.preview-page.left::after {
-  background: linear-gradient(
-    to left,
-    rgba(58, 48, 32, 0.2) 0%,
-    rgba(58, 48, 32, 0.06) 4.5%,
-    transparent 10%
-  );
-}
-
-.preview-page.right::after {
-  background: linear-gradient(
-    to right,
-    rgba(58, 48, 32, 0.2) 0%,
-    rgba(58, 48, 32, 0.06) 4.5%,
-    transparent 10%
-  );
 }
 
 .folio {
