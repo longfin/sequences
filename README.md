@@ -7,7 +7,11 @@ through the result like a printed dummy.
 
 Everything stays in your browser (IndexedDB). No server, no uploads.
 
+**Try it now → [longfin.github.io/sequences](https://longfin.github.io/sequences/)**
+
 *[한국어 안내는 아래에 있습니다.](#한국어)*
+
+![Flipping through spreads in the dummy-book preview](docs/demo.gif)
 
 ## Why
 
@@ -33,6 +37,12 @@ Sequences keeps you in spreads the whole time.
   reloads. Original files are kept at full resolution for export; the UI uses
   generated thumbnails.
 - **i18n** — Korean, English, Japanese (auto-detected, switchable).
+
+| Spread editor | Flip preview |
+| --- | --- |
+| ![Edit view](docs/edit.png) | ![Flip preview](docs/preview.png) |
+
+![Overview](docs/overview.png)
 
 ## Run
 
