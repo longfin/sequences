@@ -214,6 +214,40 @@ button {
   color: var(--danger);
 }
 
+/* ---------- sync popover ---------- */
+
+.sync-menu {
+  left: auto;
+  right: 0;
+  width: 280px;
+}
+
+.sync-note {
+  padding: 8px 11px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.sync-phrase {
+  margin: 4px 6px 6px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.sync-error {
+  padding: 6px 11px 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .menu button.danger:hover {
   background: rgba(224, 106, 90, 0.12);
 }

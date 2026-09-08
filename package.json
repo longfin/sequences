@@ -11,7 +11,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@scure/bip39": "^1.6.0",
     "idb": "^8.0.0",
+    "jazz-tools": "^0.20.19",
     "jspdf": "^2.5.2",
     "page-flip": "^2.0.7",
     "react": "^18.3.1",

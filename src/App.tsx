@@ -18,6 +18,10 @@ import { importFile, isImageFile } from './images'
 import { exportPdf } from './pdf'
 import { buildProjectFile, parseProjectFile } from './projectFile'
 import type { PhotoMap, PhotoView } from './photoStore'
+import { SyncBridge } from './sync/SyncBridge'
+import { SyncMenu } from './sync/SyncMenu'
+import { SYNC_ENABLED } from './sync/SyncProvider'
+import type { ProjectSync } from './sync/useProjectSync'
 import {
   PAGE_RATIOS,
   defaultProject,
@@ -37,6 +41,7 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const projectFileInput = useRef<HTMLInputElement>(null)
+  const syncRef = useRef<ProjectSync | null>(null)
   const [locale, setLocaleState] = useState<Locale>(detectLocale)
 
   const t = useCallback(
@@ -124,6 +129,7 @@ export default function App() {
   }
 
   async function handleDeletePhoto(id: string) {
+    syncRef.current?.removePhoto(id)
     await db.deletePhoto(id)
     setPhotos((prev) => {
       const victim = prev.get(id)
@@ -300,6 +306,7 @@ export default function App() {
       const parsed = await parseProjectFile(file, (done, total) =>
         setBusy(t('loadingFile', { done, total })),
       )
+      syncRef.current?.clearRemote()
       await db.clearAll()
       for (const rec of parsed.photos) await db.savePhoto(rec)
       replacePhotoViews(parsed.photos)
@@ -314,6 +321,7 @@ export default function App() {
 
   async function handleReset() {
     if (!window.confirm(t('resetConfirm'))) return
+    syncRef.current?.clearRemote()
     await db.clearAll()
     replacePhotoViews([])
     setProject(defaultProject())
@@ -343,6 +351,15 @@ export default function App() {
 
   return (
     <I18nContext.Provider value={{ locale, t, setLocale }}>
+    {SYNC_ENABLED && (
+      <SyncBridge
+        project={project}
+        setProject={setProject}
+        photos={photos}
+        setPhotos={setPhotos}
+        apiRef={syncRef}
+      />
+    )}
     <div className={`app ${project.grayscale ? 'grayscale' : ''}`}>
       <header className="toolbar">
         <h1 className="brand">Sequences</h1>
@@ -421,6 +438,7 @@ export default function App() {
             }}
           />
         </div>
+        {SYNC_ENABLED && <SyncMenu />}
         <div className="toolbar-spacer" />
         {busy && (
           <span className="busy">

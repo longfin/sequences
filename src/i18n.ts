@@ -103,6 +103,38 @@ const messages = {
     en: 'Not a valid Sequences project file.',
     ja: 'Sequencesのプロジェクトファイルではありません。',
   },
+  sync: { ko: '동기화', en: 'Sync', ja: '同期' },
+  syncOn: { ko: '동기화 중', en: 'Syncing', ja: '同期中' },
+  syncTitle: {
+    ko: '다른 기기와 시퀀스와 썸네일을 동기화',
+    en: 'Sync the sequence and thumbnails with your other devices',
+    ja: '他のデバイスとシーケンスとサムネイルを同期',
+  },
+  syncIntro: {
+    ko: '패스키로 시작하면 이 기기의 작업이 클라우드에 올라가고, 같은 패스키로 로그인한 iPad에서 볼 수 있습니다. 원본 사진은 이 기기에만 남습니다.',
+    en: 'Start with a passkey and this device’s work goes to the cloud, viewable on an iPad signed in with the same passkey. Originals stay on this device.',
+    ja: 'パスキーで開始すると、このデバイスの作業がクラウドに上がり、同じパスキーでログインしたiPadで見られます。原本はこのデバイスにのみ残ります。',
+  },
+  syncNote: {
+    ko: '시퀀스와 썸네일이 동기화되고 있습니다. 원본은 각 기기에만 있습니다.',
+    en: 'The sequence and thumbnails are syncing. Originals live only on each device.',
+    ja: 'シーケンスとサムネイルを同期しています。原本は各デバイスにのみあります。',
+  },
+  syncSignUp: { ko: '패스키로 시작', en: 'Start with a passkey', ja: 'パスキーで開始' },
+  syncLogIn: { ko: '패스키로 로그인', en: 'Log in with a passkey', ja: 'パスキーでログイン' },
+  syncLogOut: { ko: '동기화 끄기 (로그아웃)', en: 'Turn off sync (log out)', ja: '同期をオフ（ログアウト）' },
+  syncShowPhrase: { ko: '복구 문구 보기', en: 'Show recovery phrase', ja: '復旧フレーズを表示' },
+  syncPhrasePlaceholder: {
+    ko: '복구 문구 (12단어 이상)',
+    en: 'Recovery phrase (12+ words)',
+    ja: '復旧フレーズ（12語以上）',
+  },
+  syncPhraseLogIn: { ko: '복구 문구로 로그인', en: 'Log in with phrase', ja: 'フレーズでログイン' },
+  syncPhraseSignUp: {
+    ko: '패스키 없이 시작 (복구 문구)',
+    en: 'Start without a passkey (phrase)',
+    ja: 'パスキーなしで開始（フレーズ）',
+  },
   prev: { ko: '← 이전', en: '← Prev', ja: '← 前へ' },
   next: { ko: '다음 →', en: 'Next →', ja: '次へ →' },
 } satisfies Record<string, Record<Locale, string>>

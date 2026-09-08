@@ -48,6 +48,11 @@ export async function clearAll(): Promise<void> {
   await Promise.all([db.clear('photos'), db.clear('project')])
 }
 
+export async function getPhoto(id: string): Promise<PhotoRecord | undefined> {
+  const db = await getDB()
+  return db.get('photos', id)
+}
+
 export async function getPhotoBlob(id: string): Promise<Blob | undefined> {
   const db = await getDB()
   const rec: PhotoRecord | undefined = await db.get('photos', id)
