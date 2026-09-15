@@ -7,7 +7,8 @@ Guidance for AI agents (and humans) working on this repo.
 **Sequences** is a local-first web app for sequencing a photobook: photos go
 into a tray, get dragged onto book spreads, and the result can be flipped
 through like a printed dummy. React 18 + TypeScript + Vite, **no backend of
-our own** — all data lives in the browser's IndexedDB. Optional cross-device
+our own** — all data lives in the browser (IndexedDB; the sync session and
+merge bases in localStorage). Optional cross-device
 sync goes through Jazz Cloud (see "Sync" below) and is compiled out unless a
 key is configured. Live at <https://sequences.kelupus.com/> (GitHub Pages).
 
@@ -48,9 +49,9 @@ State lives in `App.tsx`; everything else is presentational or a thin module.
   string must go through `t()` and have all three languages.** Locale is
   auto-detected, persisted in localStorage.
 - `src/projectFile.ts` — save/load format:
-  `{ format: 'sequences-project', version: 1, project, photos[] }` with
-  photos as base64 data URLs (original + thumb). If you change the shape,
-  bump `version` and keep older versions loadable.
+  `{ format: 'sequences-project', version: 2, project, photos[] }` with
+  photos as base64 data URLs (original + thumb + `hasOriginal`). If you
+  change the shape, bump `version` and keep older versions loadable.
 
 ## Sync (optional, `src/sync/`)
 
@@ -64,8 +65,9 @@ the Sync toolbar menu is portalled into a slot App renders.
 **The contract: sync moves thumbnails and never destroys an original.**
 
 - What syncs: the project document (one JSON string, last-write-wins) and
-  the ≤600px thumbnails as Jazz `FileStream`s, fetched on demand per photo
-  (entries are resolved, thumbs are not). `PhotoRecord.hasOriginal` is false
+  the ≤600px thumbnails, inline as base64 in each record entry (one CoValue
+  per photo, so an entry that has loaded is complete; the earlier
+  `FileStream` form is still read). `PhotoRecord.hasOriginal` is false
   for photos that arrived this way; PDF export warns, and loading a save
   file never replaces a held original with a thumbnail-only record. Save
   files are `version: 2` (adds `hasOriginal`; v1 files whose blob equals
@@ -76,16 +78,27 @@ the Sync toolbar menu is portalled into a slot App renders.
   and stays in the tray. Placing it again clears the tombstone (revive).
   A delete before the entry exists is remembered and applied when the
   upload lands. Jazz has no CoValue delete; cloud storage only grows.
+- The cloud document is an envelope `{ v, project }`. A build that meets a
+  newer `v` pauses sync on that device (`incompatible` status) and never
+  overwrites the document.
 - `useProjectSync.ts` resets all bookkeeping when the account id changes.
-  On first load per account it decides using the last agreed project JSON
-  (`sequences-sync-base:<account>` in localStorage): only one side changed
-  since the last sync → that side wins silently; remote has no placed
-  photos → push local; local has none → take remote; both changed →
-  `SyncMergeDialog` (modal, focus-trapped, Esc = cancel and log out; the
-  app is `inert` behind it). Either choice merges photos; only the
+  On first load per account the bootstrap decides **imperatively** (it
+  pushes or applies right away so the incremental effects can't reverse
+  it), using the last agreed JSON (`sequences-sync-base:<account>` in
+  localStorage): equal → nothing; this device unchanged since last sync →
+  cloud wins; cloud empty, untouched (no placed photos) or unchanged since
+  last sync → this device wins; this device has no placed photos → cloud
+  wins; both changed → `SyncMergeDialog`. An empty account plus local
+  traces of another account (thumbnail-only photos, another account's
+  base) asks before uploading. The dialog is modal and focus-trapped,
+  nothing destructive is pre-focused, Esc returns to Cancel, the app is
+  `inert` behind it. Either merge choice keeps all photos; only the
   sequence is chosen.
-- Reset and Load are this-device operations: with sync active they log out
-  first (and abort if that fails) and leave the cloud untouched.
+- A tombstone for a photo this device keeps (it holds the original) is
+  shown as a tray chip ("deleted elsewhere"); placing it again revives it.
+- Reset and Load are this-device operations: when signed in they log out
+  first (abort if that fails), forget the merge bases, and leave the cloud
+  untouched.
 - Status for the toolbar and the busy indicator comes from
   `src/sync/status.ts` (no jazz import), written by the bridge.
 - Auth is passkey (WebAuthn; the secret seed lives in the credential's
@@ -96,8 +109,17 @@ the Sync toolbar menu is portalled into a slot App renders.
 - Known limits: uploads in a background tab crawl (~100KB/s) because Chrome
   throttles the library's per-chunk `setTimeout`; jazz-tools is pinned to
   the 0.20 line while jazz.tools docs describe the 2.0 alpha API.
-- Testing: passkeys can't be driven by automation; use the phrase path. Two
-  dev servers on different ports act as two devices.
+- A blank book (no placed photos, no photos) is never pushed onto an empty
+  account, at bootstrap or by the push effect: another device's first push
+  may still be in flight and last-write-wins would let the blank win. A
+  local edit that is waiting for the push debounce is not overwritten by a
+  remote change that arrives meanwhile (the user's action wins).
+- Testing: `npm test` runs `e2e/sync.spec.ts` with Playwright against a local
+  in-memory `jazz-run sync` server (see `playwright.config.ts`); each test
+  opens separate browser contexts as devices and drives the real UI with the
+  recovery-phrase path (passkeys can't be automated). `E2E_CONSOLE=1` echoes
+  browser console lines. For manual testing, two dev servers on different
+  ports act as two devices.
 
 ## Design system
 

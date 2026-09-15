@@ -8,30 +8,34 @@ interface Props {
 }
 
 /**
- * Shown once per login when this device and the account both hold a book
- * with placed photos. Nothing is synced until the user picks a side.
- * Photos are merged whichever way; only the sequence is chosen.
+ * The login-time question. 'merge': this device and the account both
+ * changed since they last agreed; only the sequence is chosen, photos are
+ * merged either way. 'upload': the account is empty but this device holds
+ * photos that look like another account's.
+ *
+ * Neither answer is a safe default, so nothing destructive is pre-focused:
+ * focus starts on Cancel, Tab stays inside, Esc returns to Cancel.
  */
 export function SyncMergeDialog({ prompt, onChoose }: Props) {
   const { t } = useI18n()
   const box = useRef<HTMLDivElement>(null)
+  const cancel = useRef<HTMLButtonElement>(null)
+  const choose = useRef(onChoose)
+  choose.current = onChoose
   const line = (s: MergeSummary) => t('syncMergeSummary', { spreads: s.spreads, placed: s.placed })
 
-  // modal behaviour: initial focus, Tab stays inside, Esc cancels, the app
-  // behind is inert (no keyboard shortcuts, no clicks)
   useEffect(() => {
     const app = document.querySelector('.app')
     app?.setAttribute('inert', '')
-    const buttons = () => [...(box.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
-    buttons()[0]?.focus()
+    cancel.current?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        onChoose('cancel')
+        cancel.current?.focus()
         return
       }
       if (e.key !== 'Tab') return
-      const list = buttons()
+      const list = [...(box.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
       if (list.length === 0) return
       const i = list.indexOf(document.activeElement as HTMLButtonElement)
       const next = e.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : i >= list.length - 1 ? 0 : i + 1
@@ -43,25 +47,34 @@ export function SyncMergeDialog({ prompt, onChoose }: Props) {
       document.removeEventListener('keydown', onKey)
       app?.removeAttribute('inert')
     }
-  }, [onChoose])
+  }, [])
 
+  const upload = prompt.kind === 'upload'
   return (
     <div className="sync-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="sync-merge-title">
       <div className="sync-dialog" ref={box}>
-        <h2 id="sync-merge-title">{t('syncMergeTitle')}</h2>
-        <p>{t('syncMergeBody')}</p>
-        <dl className="sync-merge-sides">
-          <dt>{t('syncMergeThisDevice')}</dt>
-          <dd>{line(prompt.local)}</dd>
-          <dt>{t('syncMergeCloud')}</dt>
-          <dd>{line(prompt.remote)}</dd>
-        </dl>
+        <h2 id="sync-merge-title">{t(upload ? 'syncUploadTitle' : 'syncMergeTitle')}</h2>
+        <p>{t(upload ? 'syncUploadBody' : 'syncMergeBody')}</p>
+        {!upload && (
+          <dl className="sync-merge-sides">
+            <dt>{t('syncMergeThisDevice')}</dt>
+            <dd>{line(prompt.local)}</dd>
+            <dt>{t('syncMergeCloud')}</dt>
+            <dd>{line(prompt.remote)}</dd>
+          </dl>
+        )}
         <div className="sync-dialog-actions">
-          <button className="primary" onClick={() => onChoose('remote')}>
-            {t('syncMergeTakeRemote')}
+          {upload ? (
+            <button onClick={() => choose.current('local')}>{t('syncUploadConfirm')}</button>
+          ) : (
+            <>
+              <button onClick={() => choose.current('remote')}>{t('syncMergeTakeRemote')}</button>
+              <button onClick={() => choose.current('local')}>{t('syncMergeKeepLocal')}</button>
+            </>
+          )}
+          <button ref={cancel} onClick={() => choose.current('cancel')}>
+            {t('syncMergeCancel')}
           </button>
-          <button onClick={() => onChoose('local')}>{t('syncMergeKeepLocal')}</button>
-          <button onClick={() => onChoose('cancel')}>{t('syncMergeCancel')}</button>
         </div>
       </div>
     </div>

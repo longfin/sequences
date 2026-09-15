@@ -19,10 +19,12 @@ import { exportPdf } from './pdf'
 import { buildProjectFile, parseProjectFile } from './projectFile'
 import type { PhotoMap, PhotoView } from './photoStore'
 import {
+  JAZZ_SECRET_KEY,
   SYNC_ENABLED,
   SyncBridge,
   SyncErrorBoundary,
   SyncProvider,
+  clearSyncBase,
   useSyncStatus,
   type ProjectSync,
 } from './sync'
@@ -137,9 +139,11 @@ export default function App() {
   }
 
   async function handleDeletePhoto(id: string) {
+    // local record first, then the tombstone: another tab on this origin
+    // decides what to keep by reading IndexedDB when the tombstone arrives
+    await db.deletePhoto(id)
     // other devices drop their thumbnail copy; a held original there is only unplaced
     syncRef.current?.removePhoto(id)
-    await db.deletePhoto(id)
     setPhotos((prev) => {
       const victim = prev.get(id)
       if (victim) URL.revokeObjectURL(victim.thumbUrl)
@@ -309,7 +313,6 @@ export default function App() {
   }
 
   async function handleLoadProject(file: File) {
-    const syncing = Boolean(syncRef.current?.active)
     if (!window.confirm(t(syncing ? 'loadConfirmSync' : 'loadConfirm'))) return
     setBusy(t('loadingFile', { done: 0, total: '?' }))
     try {
@@ -337,10 +340,16 @@ export default function App() {
     }
   }
 
+  /** signed in (even if the root hasn't loaded yet): this-device operations must leave first */
+  const syncing = sync.signedIn || Boolean(syncRef.current?.active)
+
   /** log out of sync before a this-device operation; false if we are still signed in */
   async function leaveSync(): Promise<boolean> {
     try {
-      await syncRef.current?.logOut()
+      if (!syncRef.current) throw new Error('sync not ready')
+      await syncRef.current.logOut()
+      // the next login must not mistake this device's fresh state for "unchanged"
+      clearSyncBase()
       return true
     } catch (err) {
       console.error(err)
@@ -349,8 +358,14 @@ export default function App() {
     }
   }
 
+  /** the Jazz subtree crashed: drop the session on this device so the user isn't stuck signed in */
+  function handleSyncFailedLogOut() {
+    localStorage.removeItem(JAZZ_SECRET_KEY)
+    clearSyncBase()
+    location.reload()
+  }
+
   async function handleReset() {
-    const syncing = Boolean(syncRef.current?.active)
     if (!window.confirm(t(syncing ? 'resetConfirmSync' : 'resetConfirm'))) return
     // Reset is a this-device operation; the cloud copy is left untouched.
     // Wait for the logout so the bridge can't pull the cloud copy back in.
@@ -385,8 +400,12 @@ export default function App() {
     project.spreads.flatMap((s) => [s.left.photoId, s.right.photoId]).filter(Boolean) as string[],
   )
   const trayPhotos = [...photos.values()].filter((p) => !assignedIds.has(p.id))
-  const syncBusy =
-    sync.toUpload + sync.toDownload > 0 ? t('syncBusy', { up: sync.toUpload, down: sync.toDownload }) : null
+  const syncBusy = sync.incompatible
+    ? t('syncIncompatible')
+    : sync.toUpload + sync.toDownload > 0
+      ? t('syncBusy', { up: sync.toUpload, down: sync.toDownload })
+      : null
+  const remoteDeleted = new Set(sync.remoteDeleted)
 
   return (
     <I18nContext.Provider value={{ locale, t, setLocale }}>
@@ -487,7 +506,13 @@ export default function App() {
         </div>
         {SYNC_ENABLED && (
           <div className="menu-wrap" ref={setMenuSlot}>
-            {!sync.loaded && <button disabled>{t('sync')}</button>}
+            {sync.failed ? (
+              <button className="danger-outline" onClick={handleSyncFailedLogOut} title={t('syncFailedTitle')}>
+                {t('syncFailed')}
+              </button>
+            ) : (
+              !sync.loaded && <button disabled>{t('sync')}</button>
+            )}
           </div>
         )}
         <div className="toolbar-spacer" />
@@ -545,6 +570,7 @@ export default function App() {
 
       <Tray
         photos={trayPhotos}
+        remoteDeleted={remoteDeleted}
         onImportFiles={importFiles}
         onDropFromSlot={handleUnassignFromSlot}
         onDeletePhoto={handleDeletePhoto}

@@ -6,12 +6,14 @@ import type { PhotoView } from '../photoStore'
 
 interface Props {
   photos: PhotoView[]
+  /** prints another device deleted; kept here because this device holds the original */
+  remoteDeleted?: Set<string>
   onImportFiles: (files: FileList | File[]) => void
   onDropFromSlot: () => void
   onDeletePhoto: (id: string) => void
 }
 
-export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: Props) {
+export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onDeletePhoto }: Props) {
   const { t } = useI18n()
   const [over, setOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -81,6 +83,11 @@ export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: P
             <button className="tray-delete" title={t('deletePhoto')} onClick={() => onDeletePhoto(p.id)}>
               ×
             </button>
+            {remoteDeleted?.has(p.id) && (
+              <span className="tray-chip" title={t('remoteDeletedTitle')}>
+                {t('remoteDeleted')}
+              </span>
+            )}
           </div>
         ))}
       </div>

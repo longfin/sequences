@@ -1,4 +1,4 @@
-import { useEffect, type MutableRefObject } from 'react'
+import { useEffect, useLayoutEffect, type MutableRefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { PhotoMap } from '../photoStore'
 import type { Project } from '../types'
@@ -22,7 +22,7 @@ interface Props {
 /**
  * The whole Jazz-dependent subtree: runs the sync hook, renders the toolbar
  * menu into its slot (so App can paint before this chunk arrives) and shows
- * the login-time merge question.
+ * the login-time question.
  */
 export function SyncBridge({ apiRef, menuSlot, ...args }: Props) {
   const api = useProjectSync(args)
@@ -32,9 +32,11 @@ export function SyncBridge({ apiRef, menuSlot, ...args }: Props) {
       apiRef.current = null
     }
   }, [api, apiRef])
-  useEffect(() => {
+  // layout effect: the placeholder button leaves in the same frame the portal arrives
+  useLayoutEffect(() => {
     setSyncStatus({ loaded: true })
-    return () => setSyncStatus({ loaded: false, active: false, signedIn: false, toUpload: 0, toDownload: 0 })
+    return () =>
+      setSyncStatus({ loaded: false, active: false, signedIn: false, toUpload: 0, toDownload: 0, remoteDeleted: [] })
   }, [])
   return (
     <>
