@@ -1,7 +1,8 @@
-import type { PhotoRecord, Project } from './types'
+import { isValidProject, type PhotoRecord, type Project } from './types'
 
 const FORMAT = 'sequences-project'
-const VERSION = 1
+// v2: adds `hasOriginal` per photo. v1 files have originals for every photo.
+const VERSION = 2
 
 interface FilePhoto {
   id: string
@@ -10,6 +11,7 @@ interface FilePhoto {
   height: number
   blob: string
   thumb: string
+  hasOriginal?: boolean
 }
 
 interface ProjectFile {
@@ -47,6 +49,7 @@ export async function buildProjectFile(
       height: r.height,
       blob: await blobToDataURL(r.blob),
       thumb: await blobToDataURL(r.thumb),
+      hasOriginal: r.hasOriginal !== false,
     })
     onProgress?.(i + 1, records.length)
   }
@@ -67,7 +70,8 @@ export async function parseProjectFile(
   if (
     payload?.format !== FORMAT ||
     typeof payload.version !== 'number' ||
-    !Array.isArray(payload.project?.spreads) ||
+    payload.version > VERSION ||
+    !isValidProject(payload.project) ||
     !Array.isArray(payload.photos)
   ) {
     throw new Error('invalid')
@@ -82,6 +86,7 @@ export async function parseProjectFile(
       height: p.height,
       blob: await dataURLToBlob(p.blob),
       thumb: await dataURLToBlob(p.thumb),
+      hasOriginal: p.hasOriginal !== false,
     })
     onProgress?.(i + 1, payload.photos.length)
   }

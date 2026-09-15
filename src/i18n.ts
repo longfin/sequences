@@ -104,7 +104,57 @@ const messages = {
     ja: 'Sequencesのプロジェクトファイルではありません。',
   },
   sync: { ko: '동기화', en: 'Sync', ja: '同期' },
-  syncOn: { ko: '동기화 중', en: 'Syncing', ja: '同期中' },
+  syncOn: { ko: '동기화 켬', en: 'Sync on', ja: '同期オン' },
+  syncError: {
+    ko: '실패했습니다. 다시 시도하거나 다른 방법으로 로그인하세요.',
+    en: 'That didn’t work. Try again or log in another way.',
+    ja: '失敗しました。もう一度試すか、別の方法でログインしてください。',
+  },
+  syncPhraseWarning: {
+    ko: '이 문구가 계정을 되찾는 유일한 방법입니다. 안전한 곳에 적어 두세요. 원본 사진은 백업되지 않습니다.',
+    en: 'This phrase is the only way back into the account. Write it down somewhere safe. Originals are not backed up.',
+    ja: 'このフレーズがアカウントに戻る唯一の方法です。安全な場所に控えてください。原本はバックアップされません。',
+  },
+  deletePhotoSyncConfirm: {
+    ko: '이 사진을 삭제할까요? 동기화된 다른 기기에서도 삭제되며, 그 기기에 있는 원본도 함께 지워집니다.',
+    en: 'Delete this photo? It will also be removed from your other synced devices, including the original stored there.',
+    ja: 'この写真を削除しますか？同期中の他のデバイスからも削除され、そこにある原本も消えます。',
+  },
+  resetConfirmSync: {
+    ko: '이 기기의 사진과 시퀀스를 모두 지우고 동기화를 끕니다. 클라우드와 다른 기기의 내용은 그대로 남습니다. 계속할까요?',
+    en: 'Delete all photos and spreads on this device and turn sync off. The cloud and your other devices keep their copy. Continue?',
+    ja: 'このデバイスの写真とシーケンスをすべて削除し、同期をオフにします。クラウドと他のデバイスの内容は残ります。続行しますか？',
+  },
+  loadConfirmSync: {
+    ko: '불러온 프로젝트로 이 기기의 작업을 교체하고 동기화를 끕니다. 다시 동기화하려면 로그인하세요. 계속할까요?',
+    en: 'Replace this device’s work with the loaded project and turn sync off. Log in again to resume syncing. Continue?',
+    ja: '読み込んだプロジェクトでこのデバイスの作業を置き換え、同期をオフにします。再開するには再度ログインしてください。続行しますか？',
+  },
+  pdfLowResConfirm: {
+    ko: '일부 사진은 이 기기에 썸네일만 있어서 PDF가 저해상도로 나옵니다. 원본이 있는 기기에서 내보내는 것이 좋습니다. 그래도 계속할까요?',
+    en: 'Some photos exist on this device only as thumbnails, so the PDF will be low resolution. Export from the device that holds the originals if you can. Continue anyway?',
+    ja: '一部の写真はこのデバイスにサムネイルしかないため、PDFは低解像度になります。原本のあるデバイスからの書き出しをお勧めします。続行しますか？',
+  },
+  syncMergeTitle: { ko: '어느 쪽을 쓸까요?', en: 'Which book do you want?', ja: 'どちらを使いますか？' },
+  syncMergeBody: {
+    ko: '이 기기와 클라우드 양쪽에 배치된 사진이 있습니다. 사진은 합쳐지지만 시퀀스는 한쪽만 남습니다.',
+    en: 'Both this device and the cloud have placed photos. Photos are merged, but only one sequence can be kept.',
+    ja: 'このデバイスとクラウドの両方に配置済みの写真があります。写真は統合されますが、シーケンスは片方のみ残ります。',
+  },
+  syncMergeThisDevice: { ko: '이 기기', en: 'This device', ja: 'このデバイス' },
+  syncMergeCloud: { ko: '클라우드', en: 'Cloud', ja: 'クラウド' },
+  syncMergeSummary: {
+    ko: '스프레드 {spreads}개, 배치된 사진 {placed}장',
+    en: '{spreads} spreads, {placed} photos placed',
+    ja: '見開き{spreads}、配置済み写真{placed}枚',
+  },
+  syncMergeTakeRemote: { ko: '클라우드 시퀀스 가져오기', en: 'Use the cloud sequence', ja: 'クラウドのシーケンスを使う' },
+  syncMergeKeepLocal: {
+    ko: '이 기기 시퀀스로 클라우드 덮어쓰기',
+    en: 'Overwrite the cloud with this device',
+    ja: 'このデバイスでクラウドを上書き',
+  },
+  syncMergeCancel: { ko: '취소하고 로그아웃', en: 'Cancel and log out', ja: 'キャンセルしてログアウト' },
   syncTitle: {
     ko: '다른 기기와 시퀀스와 썸네일을 동기화',
     en: 'Sync the sequence and thumbnails with your other devices',

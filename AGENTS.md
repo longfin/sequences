@@ -6,9 +6,10 @@ Guidance for AI agents (and humans) working on this repo.
 
 **Sequences** is a local-first web app for sequencing a photobook: photos go
 into a tray, get dragged onto book spreads, and the result can be flipped
-through like a printed dummy. React 18 + TypeScript + Vite, **no backend** —
-all data lives in the browser's IndexedDB. Live at
-<https://sequences.kelupus.com/> (GitHub Pages).
+through like a printed dummy. React 18 + TypeScript + Vite, **no backend of
+our own** — all data lives in the browser's IndexedDB. Optional cross-device
+sync goes through Jazz Cloud (see "Sync" below) and is compiled out unless a
+key is configured. Live at <https://sequences.kelupus.com/> (GitHub Pages).
 
 The product's frame of reference is bookmaking: spreads (펼침면), verso/recto,
 folios, full bleed vs margin layouts, dummy books. Keep that vocabulary.
@@ -50,6 +51,39 @@ State lives in `App.tsx`; everything else is presentational or a thin module.
   `{ format: 'sequences-project', version: 1, project, photos[] }` with
   photos as base64 data URLs (original + thumb). If you change the shape,
   bump `version` and keep older versions loadable.
+
+## Sync (optional, `src/sync/`)
+
+Enabled only when `VITE_JAZZ_API_KEY` is set at build time. `src/sync/index.ts`
+is the only module App imports; it exposes `SYNC_ENABLED` and `React.lazy`
+wrappers, so jazz-tools (~1.4MB) is a separate chunk that never loads for
+builds without a key. Everything that imports jazz-tools sits behind
+`src/sync/jazz.tsx`.
+
+- What syncs: the project document (one JSON string, last-write-wins) and
+  the ≤600px thumbnails as Jazz `FileStream`s. **Originals never sync.**
+  `PhotoRecord.hasOriginal` is false for photos that arrived this way; PDF
+  export warns, and loading a save file never replaces a held original with
+  a thumbnail-only record. Save files are `version: 2` (adds `hasOriginal`).
+- Deletes are tombstones (`deleted: true` on the record entry), never key
+  removal, so an offline device can't resurrect a photo. Jazz has no CoValue
+  delete; cloud storage is only ever added to.
+- `useProjectSync.ts` resets all bookkeeping when the account id changes.
+  On first load per account it decides: remote empty → push local; local
+  has no placed photos → take remote; both have work → `SyncMergeDialog`.
+- Reset and Load are this-device operations: with sync active they log out
+  first and leave the cloud untouched. Deleting a photo with sync active
+  asks, then propagates (including the original on other devices).
+- Auth is passkey (WebAuthn; the secret seed lives in the credential's
+  `user.id`, so iCloud Keychain carries it to the iPad) or a BIP39 recovery
+  phrase. Jazz keeps the account secret as plaintext JSON in localStorage
+  (`jazz-logged-in-secret`). Nothing is uploaded before sign-in
+  (`sync.when: 'signedUp'`).
+- Known limits: uploads in a background tab crawl (~100KB/s) because Chrome
+  throttles the library's per-chunk `setTimeout`; jazz-tools is pinned to
+  the 0.20 line while jazz.tools docs describe the 2.0 alpha API.
+- Testing: passkeys can't be driven by automation; use the phrase path. Two
+  dev servers on different ports act as two devices.
 
 ## Design system
 

@@ -30,19 +30,27 @@ export function SyncMenu() {
     return () => document.removeEventListener('click', close)
   }, [open])
 
+  // never show the phrase again after the popover closes or the account changes
+  useEffect(() => {
+    if (!open || !signedIn) setShowPhrase(false)
+  }, [open, signedIn])
+
   async function run(fn: () => Promise<unknown>) {
     setError(null)
     setBusy(true)
     try {
       await fn()
     } catch (err) {
-      const e = err as Error & { cause?: unknown }
-      const cause = e.cause as { message?: string } | undefined
-      setError(cause?.message ?? e.message)
+      // Library errors are English and sometimes technical; keep them in the
+      // console and show a translated line.
+      console.error('sync auth failed', err)
+      setError(t('syncError'))
     } finally {
       setBusy(false)
     }
   }
+
+  const phraseWords = phraseInput.trim().split(/\s+/).filter(Boolean).length
 
   return (
     <div className="menu-wrap">
@@ -63,7 +71,19 @@ export function SyncMenu() {
               <p className="sync-note">{t('syncNote')}</p>
               <button onClick={() => setShowPhrase((s) => !s)}>{t('syncShowPhrase')}</button>
               {showPhrase && (
-                <textarea className="sync-phrase" readOnly value={phrase.passphrase} rows={4} />
+                <>
+                  <p className="sync-note">{t('syncPhraseWarning')}</p>
+                  <textarea
+                    className="sync-phrase"
+                    readOnly
+                    value={phrase.passphrase}
+                    rows={4}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                  />
+                </>
               )}
               <div className="menu-sep" />
               <button className="danger" onClick={() => run(async () => logOut())}>
@@ -86,10 +106,19 @@ export function SyncMenu() {
                 placeholder={t('syncPhrasePlaceholder')}
                 value={phraseInput}
                 onChange={(e) => setPhraseInput(e.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
               />
               <button
-                disabled={busy || phraseInput.trim().split(/\s+/).length < 12}
-                onClick={() => run(() => phrase.logIn(phraseInput.trim()))}
+                disabled={busy || phraseWords < 12}
+                onClick={() =>
+                  run(async () => {
+                    await phrase.logIn(phraseInput.trim())
+                    setPhraseInput('')
+                  })
+                }
               >
                 {t('syncPhraseLogIn')}
               </button>

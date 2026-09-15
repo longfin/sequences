@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { FlipPreview } from './components/FlipPreview'
 import { Overview } from './components/Overview'
 import { SpreadStrip } from './components/SpreadStrip'
@@ -18,15 +18,14 @@ import { importFile, isImageFile } from './images'
 import { exportPdf } from './pdf'
 import { buildProjectFile, parseProjectFile } from './projectFile'
 import type { PhotoMap, PhotoView } from './photoStore'
-import { SyncBridge } from './sync/SyncBridge'
-import { SyncMenu } from './sync/SyncMenu'
-import { SYNC_ENABLED } from './sync/SyncProvider'
-import type { ProjectSync } from './sync/useProjectSync'
+import { SYNC_ENABLED, SyncBridge, SyncMenu, type ProjectSync } from './sync'
 import {
   PAGE_RATIOS,
   defaultProject,
   newSpread,
+  placedPhotoIds,
   type Layout,
+  type PhotoRecord,
   type Project,
   type Spread,
 } from './types'
@@ -129,7 +128,10 @@ export default function App() {
   }
 
   async function handleDeletePhoto(id: string) {
-    syncRef.current?.removePhoto(id)
+    if (syncRef.current?.active) {
+      if (!window.confirm(t('deletePhotoSyncConfirm'))) return
+      syncRef.current.removePhoto(id)
+    }
     await db.deletePhoto(id)
     setPhotos((prev) => {
       const victim = prev.get(id)
@@ -300,16 +302,25 @@ export default function App() {
   }
 
   async function handleLoadProject(file: File) {
-    if (!window.confirm(t('loadConfirm'))) return
+    const syncing = Boolean(syncRef.current?.active)
+    if (!window.confirm(t(syncing ? 'loadConfirmSync' : 'loadConfirm'))) return
     setBusy(t('loadingFile', { done: 0, total: '?' }))
     try {
       const parsed = await parseProjectFile(file, (done, total) =>
         setBusy(t('loadingFile', { done, total })),
       )
-      syncRef.current?.clearRemote()
+      // Loading is a this-device operation. Leave the account (and wait for
+      // it) rather than pushing a wholesale replacement to every other device.
+      if (syncing) await syncRef.current?.logOut()
+      // A save made on a thumbnail-only device must not replace originals we hold.
+      const existing = new Map<string, PhotoRecord>()
+      for (const rec of await db.loadPhotos()) {
+        if (rec.hasOriginal !== false) existing.set(rec.id, rec)
+      }
+      const photos = parsed.photos.map((rec) => (!rec.hasOriginal && existing.get(rec.id)) || rec)
       await db.clearAll()
-      for (const rec of parsed.photos) await db.savePhoto(rec)
-      replacePhotoViews(parsed.photos)
+      for (const rec of photos) await db.savePhoto(rec)
+      replacePhotoViews(photos)
       setProject(parsed.project)
     } catch (err) {
       console.error(err)
@@ -320,8 +331,11 @@ export default function App() {
   }
 
   async function handleReset() {
-    if (!window.confirm(t('resetConfirm'))) return
-    syncRef.current?.clearRemote()
+    const syncing = Boolean(syncRef.current?.active)
+    if (!window.confirm(t(syncing ? 'resetConfirmSync' : 'resetConfirm'))) return
+    // Reset is a this-device operation; the cloud copy is left untouched.
+    // Wait for the logout so the bridge can't pull the cloud copy back in.
+    if (syncing) await syncRef.current?.logOut()
     await db.clearAll()
     replacePhotoViews([])
     setProject(defaultProject())
@@ -331,6 +345,10 @@ export default function App() {
 
   async function handleExportPdf() {
     if (!project) return
+    const records = await Promise.all(placedPhotoIds(project).map((id) => db.getPhoto(id)))
+    if (records.some((r) => r && r.hasOriginal === false) && !window.confirm(t('pdfLowResConfirm'))) {
+      return
+    }
     setBusy(t('exportingPdfStart'))
     try {
       await exportPdf(project, (done, total) => setBusy(t('exportingPdf', { done, total })))
@@ -352,13 +370,16 @@ export default function App() {
   return (
     <I18nContext.Provider value={{ locale, t, setLocale }}>
     {SYNC_ENABLED && (
-      <SyncBridge
-        project={project}
-        setProject={setProject}
-        photos={photos}
-        setPhotos={setPhotos}
-        apiRef={syncRef}
-      />
+      <Suspense fallback={null}>
+        <SyncBridge
+          project={project}
+          setProject={setProject}
+          updateProject={update}
+          photos={photos}
+          setPhotos={setPhotos}
+          apiRef={syncRef}
+        />
+      </Suspense>
     )}
     <div className={`app ${project.grayscale ? 'grayscale' : ''}`}>
       <header className="toolbar">
@@ -438,7 +459,11 @@ export default function App() {
             }}
           />
         </div>
-        {SYNC_ENABLED && <SyncMenu />}
+        {SYNC_ENABLED && (
+          <Suspense fallback={null}>
+            <SyncMenu />
+          </Suspense>
+        )}
         <div className="toolbar-spacer" />
         {busy && (
           <span className="busy">
