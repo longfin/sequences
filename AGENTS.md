@@ -55,25 +55,39 @@ State lives in `App.tsx`; everything else is presentational or a thin module.
 ## Sync (optional, `src/sync/`)
 
 Enabled only when `VITE_JAZZ_API_KEY` is set at build time. `src/sync/index.ts`
-is the only module App imports; it exposes `SYNC_ENABLED` and `React.lazy`
-wrappers, so jazz-tools (~1.4MB) is a separate chunk that never loads for
-builds without a key. Everything that imports jazz-tools sits behind
-`src/sync/jazz.tsx`.
+is the only module App imports; it exposes `SYNC_ENABLED`, `React.lazy`
+wrappers, an error boundary and the status store, so jazz-tools (~1.2MB) is
+a separate chunk that never loads for builds without a key, and App paints
+before it. Everything that imports jazz-tools sits behind `src/sync/jazz.tsx`;
+the Sync toolbar menu is portalled into a slot App renders.
+
+**The contract: sync moves thumbnails and never destroys an original.**
 
 - What syncs: the project document (one JSON string, last-write-wins) and
-  the ≤600px thumbnails as Jazz `FileStream`s. **Originals never sync.**
-  `PhotoRecord.hasOriginal` is false for photos that arrived this way; PDF
-  export warns, and loading a save file never replaces a held original with
-  a thumbnail-only record. Save files are `version: 2` (adds `hasOriginal`).
+  the ≤600px thumbnails as Jazz `FileStream`s, fetched on demand per photo
+  (entries are resolved, thumbs are not). `PhotoRecord.hasOriginal` is false
+  for photos that arrived this way; PDF export warns, and loading a save
+  file never replaces a held original with a thumbnail-only record. Save
+  files are `version: 2` (adds `hasOriginal`; v1 files whose blob equals
+  the thumb are treated as thumbnail-only).
 - Deletes are tombstones (`deleted: true` on the record entry), never key
-  removal, so an offline device can't resurrect a photo. Jazz has no CoValue
-  delete; cloud storage is only ever added to.
+  removal, so an offline device can't resurrect a photo. On another device a
+  tombstone removes a thumbnail-only copy; a held original is only unplaced
+  and stays in the tray. Placing it again clears the tombstone (revive).
+  A delete before the entry exists is remembered and applied when the
+  upload lands. Jazz has no CoValue delete; cloud storage only grows.
 - `useProjectSync.ts` resets all bookkeeping when the account id changes.
-  On first load per account it decides: remote empty → push local; local
-  has no placed photos → take remote; both have work → `SyncMergeDialog`.
+  On first load per account it decides using the last agreed project JSON
+  (`sequences-sync-base:<account>` in localStorage): only one side changed
+  since the last sync → that side wins silently; remote has no placed
+  photos → push local; local has none → take remote; both changed →
+  `SyncMergeDialog` (modal, focus-trapped, Esc = cancel and log out; the
+  app is `inert` behind it). Either choice merges photos; only the
+  sequence is chosen.
 - Reset and Load are this-device operations: with sync active they log out
-  first and leave the cloud untouched. Deleting a photo with sync active
-  asks, then propagates (including the original on other devices).
+  first (and abort if that fails) and leave the cloud untouched.
+- Status for the toolbar and the busy indicator comes from
+  `src/sync/status.ts` (no jazz import), written by the bridge.
 - Auth is passkey (WebAuthn; the secret seed lives in the credential's
   `user.id`, so iCloud Keychain carries it to the iPad) or a BIP39 recovery
   phrase. Jazz keeps the account secret as plaintext JSON in localStorage

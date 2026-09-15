@@ -7,9 +7,10 @@ deciding which photographs go where, long before layout software. Upload
 photos into a tray, drag them onto book spreads, study the pairings, and flip
 through the result like a printed dummy.
 
-Everything stays in your browser (IndexedDB). No server, no uploads, no
-account. Optionally, sign in to sync the sequence and thumbnails to your
-other devices; originals still never leave the device that imported them.
+Everything stays in your browser (IndexedDB). No server of its own, no
+account required. If you want the same book on your iPad, you can sign in
+to sync the sequence and thumbnails between your devices; originals still
+never leave the device that imported them.
 
 **Try it now → [sequences.kelupus.com](https://sequences.kelupus.com/)**
 

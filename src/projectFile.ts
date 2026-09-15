@@ -86,7 +86,9 @@ export async function parseProjectFile(
       height: p.height,
       blob: await dataURLToBlob(p.blob),
       thumb: await dataURLToBlob(p.thumb),
-      hasOriginal: p.hasOriginal !== false,
+      // v1 files written by a thumbnail-only device stored the thumb as the
+      // original too; equal data URLs give that away
+      hasOriginal: p.hasOriginal !== false && p.blob !== p.thumb,
     })
     onProgress?.(i + 1, payload.photos.length)
   }

@@ -2,6 +2,7 @@ import { wordlist } from '@scure/bip39/wordlists/english'
 import { useLogOut, usePasskeyAuth, usePassphraseAuth } from 'jazz-tools/react'
 import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
+import { useSyncStatus } from './status'
 
 /**
  * Toolbar popover for turning sync on/off.
@@ -22,6 +23,8 @@ export function SyncMenu() {
   const phrase = usePassphraseAuth({ wordlist })
   const logOut = useLogOut()
   const signedIn = passkey.state === 'signedIn'
+  const status = useSyncStatus()
+  const label = !signedIn ? t('sync') : status.active ? t('syncOn') : t('syncConnecting')
 
   useEffect(() => {
     if (!open) return
@@ -62,7 +65,7 @@ export function SyncMenu() {
         }}
         title={t('syncTitle')}
       >
-        {signedIn ? t('syncOn') : t('sync')}
+        {label}
       </button>
       {open && (
         <div className="menu sync-menu" onClick={(e) => e.stopPropagation()}>

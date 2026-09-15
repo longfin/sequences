@@ -18,7 +18,14 @@ import { importFile, isImageFile } from './images'
 import { exportPdf } from './pdf'
 import { buildProjectFile, parseProjectFile } from './projectFile'
 import type { PhotoMap, PhotoView } from './photoStore'
-import { SYNC_ENABLED, SyncBridge, SyncMenu, type ProjectSync } from './sync'
+import {
+  SYNC_ENABLED,
+  SyncBridge,
+  SyncErrorBoundary,
+  SyncProvider,
+  useSyncStatus,
+  type ProjectSync,
+} from './sync'
 import {
   PAGE_RATIOS,
   defaultProject,
@@ -41,6 +48,8 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const projectFileInput = useRef<HTMLInputElement>(null)
   const syncRef = useRef<ProjectSync | null>(null)
+  const [menuSlot, setMenuSlot] = useState<HTMLDivElement | null>(null)
+  const sync = useSyncStatus()
   const [locale, setLocaleState] = useState<Locale>(detectLocale)
 
   const t = useCallback(
@@ -128,10 +137,8 @@ export default function App() {
   }
 
   async function handleDeletePhoto(id: string) {
-    if (syncRef.current?.active) {
-      if (!window.confirm(t('deletePhotoSyncConfirm'))) return
-      syncRef.current.removePhoto(id)
-    }
+    // other devices drop their thumbnail copy; a held original there is only unplaced
+    syncRef.current?.removePhoto(id)
     await db.deletePhoto(id)
     setPhotos((prev) => {
       const victim = prev.get(id)
@@ -311,7 +318,7 @@ export default function App() {
       )
       // Loading is a this-device operation. Leave the account (and wait for
       // it) rather than pushing a wholesale replacement to every other device.
-      if (syncing) await syncRef.current?.logOut()
+      if (syncing && !(await leaveSync())) return
       // A save made on a thumbnail-only device must not replace originals we hold.
       const existing = new Map<string, PhotoRecord>()
       for (const rec of await db.loadPhotos()) {
@@ -330,12 +337,24 @@ export default function App() {
     }
   }
 
+  /** log out of sync before a this-device operation; false if we are still signed in */
+  async function leaveSync(): Promise<boolean> {
+    try {
+      await syncRef.current?.logOut()
+      return true
+    } catch (err) {
+      console.error(err)
+      alert(t('syncError'))
+      return false
+    }
+  }
+
   async function handleReset() {
     const syncing = Boolean(syncRef.current?.active)
     if (!window.confirm(t(syncing ? 'resetConfirmSync' : 'resetConfirm'))) return
     // Reset is a this-device operation; the cloud copy is left untouched.
     // Wait for the logout so the bridge can't pull the cloud copy back in.
-    if (syncing) await syncRef.current?.logOut()
+    if (syncing && !(await leaveSync())) return
     await db.clearAll()
     replacePhotoViews([])
     setProject(defaultProject())
@@ -366,20 +385,27 @@ export default function App() {
     project.spreads.flatMap((s) => [s.left.photoId, s.right.photoId]).filter(Boolean) as string[],
   )
   const trayPhotos = [...photos.values()].filter((p) => !assignedIds.has(p.id))
+  const syncBusy =
+    sync.toUpload + sync.toDownload > 0 ? t('syncBusy', { up: sync.toUpload, down: sync.toDownload }) : null
 
   return (
     <I18nContext.Provider value={{ locale, t, setLocale }}>
     {SYNC_ENABLED && (
-      <Suspense fallback={null}>
-        <SyncBridge
-          project={project}
-          setProject={setProject}
-          updateProject={update}
-          photos={photos}
-          setPhotos={setPhotos}
-          apiRef={syncRef}
-        />
-      </Suspense>
+      <SyncErrorBoundary>
+        <Suspense fallback={null}>
+          <SyncProvider>
+            <SyncBridge
+              project={project}
+              setProject={setProject}
+              updateProject={update}
+              photos={photos}
+              setPhotos={setPhotos}
+              apiRef={syncRef}
+              menuSlot={menuSlot}
+            />
+          </SyncProvider>
+        </Suspense>
+      </SyncErrorBoundary>
     )}
     <div className={`app ${project.grayscale ? 'grayscale' : ''}`}>
       <header className="toolbar">
@@ -460,15 +486,15 @@ export default function App() {
           />
         </div>
         {SYNC_ENABLED && (
-          <Suspense fallback={null}>
-            <SyncMenu />
-          </Suspense>
+          <div className="menu-wrap" ref={setMenuSlot}>
+            {!sync.loaded && <button disabled>{t('sync')}</button>}
+          </div>
         )}
         <div className="toolbar-spacer" />
-        {busy && (
+        {(busy || syncBusy) && (
           <span className="busy">
             <span className="busy-dot" />
-            {busy}
+            {busy ?? syncBusy}
           </span>
         )}
         <div className="seg" role="group" aria-label={t('viewSwitch')}>

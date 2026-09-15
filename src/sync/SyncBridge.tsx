@@ -1,6 +1,9 @@
 import { useEffect, type MutableRefObject } from 'react'
+import { createPortal } from 'react-dom'
 import type { PhotoMap } from '../photoStore'
 import type { Project } from '../types'
+import { setSyncStatus } from './status'
+import { SyncMenu } from './SyncMenu'
 import { SyncMergeDialog } from './SyncMergeDialog'
 import { useProjectSync, type ProjectSync } from './useProjectSync'
 
@@ -12,13 +15,16 @@ interface Props {
   setPhotos: (fn: (prev: PhotoMap) => PhotoMap) => void
   /** App reads the imperative API (removePhoto, logOut, active) through this ref */
   apiRef: MutableRefObject<ProjectSync | null>
+  /** toolbar element the Sync menu is portalled into */
+  menuSlot: HTMLElement | null
 }
 
 /**
- * Mounts the sync hook (hooks can't be called conditionally, and App must
- * work without a Jazz provider) and renders the login-time merge question.
+ * The whole Jazz-dependent subtree: runs the sync hook, renders the toolbar
+ * menu into its slot (so App can paint before this chunk arrives) and shows
+ * the login-time merge question.
  */
-export function SyncBridge({ apiRef, ...args }: Props) {
+export function SyncBridge({ apiRef, menuSlot, ...args }: Props) {
   const api = useProjectSync(args)
   useEffect(() => {
     apiRef.current = api
@@ -26,6 +32,14 @@ export function SyncBridge({ apiRef, ...args }: Props) {
       apiRef.current = null
     }
   }, [api, apiRef])
-  if (!api.pending) return null
-  return <SyncMergeDialog prompt={api.pending} onChoose={api.resolveMerge} />
+  useEffect(() => {
+    setSyncStatus({ loaded: true })
+    return () => setSyncStatus({ loaded: false, active: false, signedIn: false, toUpload: 0, toDownload: 0 })
+  }, [])
+  return (
+    <>
+      {menuSlot && createPortal(<SyncMenu />, menuSlot)}
+      {api.pending && <SyncMergeDialog prompt={api.pending} onChoose={api.resolveMerge} />}
+    </>
+  )
 }

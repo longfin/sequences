@@ -104,7 +104,13 @@ const messages = {
     ja: 'Sequencesのプロジェクトファイルではありません。',
   },
   sync: { ko: '동기화', en: 'Sync', ja: '同期' },
-  syncOn: { ko: '동기화 켬', en: 'Sync on', ja: '同期オン' },
+  syncOn: { ko: '동기화 켜짐', en: 'Sync on', ja: '同期オン' },
+  syncConnecting: { ko: '동기화 연결 중', en: 'Sync connecting', ja: '同期接続中' },
+  syncBusy: {
+    ko: '동기화 중… 올리기 {up} · 받기 {down}',
+    en: 'Syncing… {up} to send · {down} to receive',
+    ja: '同期中… 送信 {up} · 受信 {down}',
+  },
   syncError: {
     ko: '실패했습니다. 다시 시도하거나 다른 방법으로 로그인하세요.',
     en: 'That didn’t work. Try again or log in another way.',
@@ -113,12 +119,7 @@ const messages = {
   syncPhraseWarning: {
     ko: '이 문구가 계정을 되찾는 유일한 방법입니다. 안전한 곳에 적어 두세요. 원본 사진은 백업되지 않습니다.',
     en: 'This phrase is the only way back into the account. Write it down somewhere safe. Originals are not backed up.',
-    ja: 'このフレーズがアカウントに戻る唯一の方法です。安全な場所に控えてください。原本はバックアップされません。',
-  },
-  deletePhotoSyncConfirm: {
-    ko: '이 사진을 삭제할까요? 동기화된 다른 기기에서도 삭제되며, 그 기기에 있는 원본도 함께 지워집니다.',
-    en: 'Delete this photo? It will also be removed from your other synced devices, including the original stored there.',
-    ja: 'この写真を削除しますか？同期中の他のデバイスからも削除され、そこにある原本も消えます。',
+    ja: 'このフレーズがアカウントに戻る唯一の方法です。安全な場所に控えてください。オリジナルはバックアップされません。',
   },
   resetConfirmSync: {
     ko: '이 기기의 사진과 시퀀스를 모두 지우고 동기화를 끕니다. 클라우드와 다른 기기의 내용은 그대로 남습니다. 계속할까요?',
@@ -133,7 +134,7 @@ const messages = {
   pdfLowResConfirm: {
     ko: '일부 사진은 이 기기에 썸네일만 있어서 PDF가 저해상도로 나옵니다. 원본이 있는 기기에서 내보내는 것이 좋습니다. 그래도 계속할까요?',
     en: 'Some photos exist on this device only as thumbnails, so the PDF will be low resolution. Export from the device that holds the originals if you can. Continue anyway?',
-    ja: '一部の写真はこのデバイスにサムネイルしかないため、PDFは低解像度になります。原本のあるデバイスからの書き出しをお勧めします。続行しますか？',
+    ja: '一部の写真はこのデバイスにサムネイルしかないため、PDFは低解像度になります。オリジナルのあるデバイスからの書き出しをお勧めします。続行しますか？',
   },
   syncMergeTitle: { ko: '어느 쪽을 쓸까요?', en: 'Which book do you want?', ja: 'どちらを使いますか？' },
   syncMergeBody: {
@@ -146,7 +147,7 @@ const messages = {
   syncMergeSummary: {
     ko: '스프레드 {spreads}개, 배치된 사진 {placed}장',
     en: '{spreads} spreads, {placed} photos placed',
-    ja: '見開き{spreads}、配置済み写真{placed}枚',
+    ja: '見開き{spreads}組、配置済み写真{placed}枚',
   },
   syncMergeTakeRemote: { ko: '클라우드 시퀀스 가져오기', en: 'Use the cloud sequence', ja: 'クラウドのシーケンスを使う' },
   syncMergeKeepLocal: {
@@ -156,28 +157,28 @@ const messages = {
   },
   syncMergeCancel: { ko: '취소하고 로그아웃', en: 'Cancel and log out', ja: 'キャンセルしてログアウト' },
   syncTitle: {
-    ko: '다른 기기와 시퀀스와 썸네일을 동기화',
+    ko: '시퀀스와 썸네일을 다른 기기와 동기화',
     en: 'Sync the sequence and thumbnails with your other devices',
     ja: '他のデバイスとシーケンスとサムネイルを同期',
   },
   syncIntro: {
     ko: '패스키로 시작하면 이 기기의 작업이 클라우드에 올라가고, 같은 패스키로 로그인한 iPad에서 볼 수 있습니다. 원본 사진은 이 기기에만 남습니다.',
     en: 'Start with a passkey and this device’s work goes to the cloud, viewable on an iPad signed in with the same passkey. Originals stay on this device.',
-    ja: 'パスキーで開始すると、このデバイスの作業がクラウドに上がり、同じパスキーでログインしたiPadで見られます。原本はこのデバイスにのみ残ります。',
+    ja: 'パスキーで開始すると、このデバイスの作業がクラウドに上がり、同じパスキーでログインしたiPadで見られます。オリジナルはこのデバイスにのみ残ります。',
   },
   syncNote: {
     ko: '시퀀스와 썸네일이 동기화되고 있습니다. 원본은 각 기기에만 있습니다.',
     en: 'The sequence and thumbnails are syncing. Originals live only on each device.',
-    ja: 'シーケンスとサムネイルを同期しています。原本は各デバイスにのみあります。',
+    ja: 'シーケンスとサムネイルを同期しています。オリジナルは各デバイスにのみあります。',
   },
   syncSignUp: { ko: '패스키로 시작', en: 'Start with a passkey', ja: 'パスキーで開始' },
   syncLogIn: { ko: '패스키로 로그인', en: 'Log in with a passkey', ja: 'パスキーでログイン' },
   syncLogOut: { ko: '동기화 끄기 (로그아웃)', en: 'Turn off sync (log out)', ja: '同期をオフ（ログアウト）' },
-  syncShowPhrase: { ko: '복구 문구 보기', en: 'Show recovery phrase', ja: '復旧フレーズを表示' },
+  syncShowPhrase: { ko: '복구 문구 보기', en: 'Show recovery phrase', ja: 'リカバリーフレーズを表示' },
   syncPhrasePlaceholder: {
     ko: '복구 문구 (12단어 이상)',
     en: 'Recovery phrase (12+ words)',
-    ja: '復旧フレーズ（12語以上）',
+    ja: 'リカバリーフレーズ（12語以上）',
   },
   syncPhraseLogIn: { ko: '복구 문구로 로그인', en: 'Log in with phrase', ja: 'フレーズでログイン' },
   syncPhraseSignUp: {
