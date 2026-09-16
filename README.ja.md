@@ -59,7 +59,8 @@ npm run dev
 
 React + TypeScript + Vite製。オリジナルの写真がブラウザの外に出ることはありません。
 
-同期はビルド時に `VITE_JAZZ_API_KEY`（[Jazz](https://jazz.tools) Cloudのキー）が
+同期はビルド時に `VITE_JAZZ_API_KEY`（[Jazz](https://jazz.tools) Cloudのキー）か
+`VITE_JAZZ_SYNC_PEER`（自前の同期サーバー。テストはローカルのものを使用）が
 ある場合のみ有効になります。その場合「同期」ボタンが現れ、パスキーまたは
 リカバリーフレーズでログインするまでは何もアップロードされず、アップロード
 されるのもシーケンスと600px以下のサムネイルだけです。

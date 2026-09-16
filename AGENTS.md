@@ -20,10 +20,12 @@ folios, full bleed vs margin layouts, dummy books. Keep that vocabulary.
 ```bash
 npm run dev          # dev server
 npx tsc --noEmit     # typecheck (run before committing)
+npm test             # two-device sync suite (Playwright; starts its own servers)
 npx vite build       # production build (run before pushing)
 ```
 
-There are no unit tests. Verification is browser-driven — see below.
+There are no unit tests; `npm test` is an end-to-end suite for sync only.
+Everything else is verified in a browser — see below.
 
 ## Architecture
 
@@ -55,7 +57,8 @@ State lives in `App.tsx`; everything else is presentational or a thin module.
 
 ## Sync (optional, `src/sync/`)
 
-Enabled only when `VITE_JAZZ_API_KEY` is set at build time. `src/sync/index.ts`
+Enabled only when `VITE_JAZZ_API_KEY` (Jazz Cloud) or `VITE_JAZZ_SYNC_PEER`
+(a `ws://` sync server, used by the tests) is set at build time. `src/sync/index.ts`
 is the only module App imports; it exposes `SYNC_ENABLED`, `React.lazy`
 wrappers, an error boundary and the status store, so jazz-tools (~1.2MB) is
 a separate chunk that never loads for builds without a key, and App paints
@@ -74,10 +77,30 @@ the Sync toolbar menu is portalled into a slot App renders.
   the thumb are treated as thumbnail-only).
 - Deletes are tombstones (`deleted: true` on the record entry), never key
   removal, so an offline device can't resurrect a photo. On another device a
-  tombstone removes a thumbnail-only copy; a held original is only unplaced
-  and stays in the tray. Placing it again clears the tombstone (revive).
-  A delete before the entry exists is remembered and applied when the
-  upload lands. Jazz has no CoValue delete; cloud storage only grows.
+  tombstone unplaces the photo; a thumbnail-only copy is then removed (in
+  one IndexedDB transaction, so a record another tab just wrote is never
+  swept), a held original stays in the tray with a "deleted" chip. Placing a
+  photo again revives it, but only a photo the user placed on *this* device
+  (`placedHere`), never an id inherited from a pulled project. A delete
+  before the entry exists is remembered and applied once when the upload
+  lands; a delete while logged out is not remembered (the thumbnail comes
+  back on the next login). Jazz has no CoValue delete; cloud storage only
+  grows.
+- A device that synced the account before (it has a merge base) decides
+  only while the server peer is open and has reported the root's state;
+  otherwise the phase is `blocked` with `offline` status, re-checked every
+  2s, and a short grace follows a reconnect so newer server state can
+  arrive. A first contact whose root looks blank waits up to 6s for content
+  before believing it (the creator of the account is exempt).
+- Two Jazz-level races are handled explicitly: the account migration waits
+  for the server before concluding "no root" on a login (it would otherwise
+  create a second, empty root that wins by LWW), and if the running account
+  ever differs from the stored credentials the bridge does not sync and
+  reloads once so Jazz restarts from the credentials.
+- Tabs on one origin share the session and IndexedDB but run their own
+  bridge. Reset / Load / sign-out post a `BroadcastChannel` event
+  (`src/sync/status.ts`): other tabs log out too and reload after the store
+  was replaced.
 - The cloud document is an envelope `{ v, project }`. A build that meets a
   newer `v` pauses sync on that device (`incompatible` status) and never
   overwrites the document.
@@ -109,17 +132,24 @@ the Sync toolbar menu is portalled into a slot App renders.
 - Known limits: uploads in a background tab crawl (~100KB/s) because Chrome
   throttles the library's per-chunk `setTimeout`; jazz-tools is pinned to
   the 0.20 line while jazz.tools docs describe the 2.0 alpha API.
-- A blank book (no placed photos, no photos) is never pushed onto an empty
-  account, at bootstrap or by the push effect: another device's first push
-  may still be in flight and last-write-wins would let the blank win. A
-  local edit that is waiting for the push debounce is not overwritten by a
-  remote change that arrives meanwhile (the user's action wins).
+- A sequence with no placed photos is never pushed onto an empty account,
+  at bootstrap or by the push effect (photos still upload through the photo
+  effect): another device's first push may still be in flight and
+  last-write-wins would let the blank win. A local edit that is waiting for
+  the push debounce is not overwritten by a remote change that arrives
+  meanwhile (the user's action wins).
+- The "Sync error" fallback (error boundary) offers reload first; leaving
+  the account is a second button behind a confirm that shows the recovery
+  phrase derived from the stored seed.
 - Testing: `npm test` runs `e2e/sync.spec.ts` with Playwright against a local
-  in-memory `jazz-run sync` server (see `playwright.config.ts`); each test
-  opens separate browser contexts as devices and drives the real UI with the
-  recovery-phrase path (passkeys can't be automated). `E2E_CONSOLE=1` echoes
-  browser console lines. For manual testing, two dev servers on different
-  ports act as two devices.
+  in-memory `jazz-run sync` server and a **production build** served by
+  `vite preview` (see `playwright.config.ts`; the dev server's StrictMode
+  double effects make Jazz create two anonymous accounts per page and the
+  credentials can name the wrong one). Each test opens separate browser
+  contexts as devices and drives the real UI with the recovery-phrase path
+  (passkeys can't be automated). `E2E_CONSOLE=1` echoes browser console
+  lines. For manual testing, two dev servers on different ports act as two
+  devices.
 
 ## Design system
 

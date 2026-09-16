@@ -1,11 +1,11 @@
 import { co } from 'jazz-tools'
-import { useAccount, useIsAuthenticated, useLogOut } from 'jazz-tools/react'
+import { useAccount, useIsAuthenticated, useJazzContextValue, useLogOut } from 'jazz-tools/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as db from '../db'
 import type { PhotoMap } from '../photoStore'
 import { isValidProject, placedPhotoIds, type Project } from '../types'
-import { SeqAccount } from './schema'
-import { SYNC_BASE_PREFIX, setSyncStatus } from './status'
+import { SyncPhoto, SeqAccount, createdHere } from './schema'
+import { JAZZ_SECRET_KEY, SYNC_BASE_PREFIX, onSyncEvent, setSyncStatus } from './status'
 
 interface Args {
   project: Project | null
@@ -22,7 +22,7 @@ export interface MergeSummary {
 
 export interface MergePrompt {
   /** 'merge': both sides changed since the last sync. 'upload': the account is empty
-   *  but this device holds photos that look like another account's. */
+   *  but this device holds photos that came through a previous login. */
   kind: 'merge' | 'upload'
   local: MergeSummary
   remote: MergeSummary
@@ -42,16 +42,21 @@ export interface ProjectSync {
   logOut: () => Promise<void>
 }
 
-// Entries are resolved, thumbs are not: a thumb is fetched on demand only
-// for photos this device lacks, so tombstones and already-held photos cost
-// nothing and the root doesn't re-snapshot on every stream chunk.
-// `$onError: 'catch'` keeps one unreadable entry from taking the root down.
+// Entries are resolved; each carries its thumbnail inline, so an entry that
+// has loaded is complete. `$onError: 'catch'` keeps one unreadable entry from
+// taking the root down.
 const RESOLVE = { root: { photos: { $each: { $onError: 'catch' } } } } as const
 
 const THUMB_LOAD_TIMEOUT = 60_000
 const THUMB_MAX_ATTEMPTS = 6
-/** a stream created on another device a moment ago may not be on the server yet: retry soon, then back off */
-const thumbRetryDelay = (attempts: number) => Math.min(2_000 * 4 ** (attempts - 1), 60_000)
+/** a load that failed is retried soon, then with backoff */
+const retryDelay = (attempts: number) => Math.min(2_000 * 4 ** (attempts - 1), 60_000)
+/** while the server can't be reached, look again this often */
+const OFFLINE_POLL = 2_000
+/** after (re)connecting, give the server's newer state a moment to arrive before deciding */
+const CONNECT_GRACE = 1_500
+/** a root that looks blank on first contact gets this long to fill before we believe it */
+const BLANK_ROOT_WAIT = 6_000
 
 /**
  * The cloud document is `{ v, project }`. A build that meets a newer `v`
@@ -121,6 +126,15 @@ function writeBase(account: string, json: string) {
     /* storage unavailable: we just ask more often */
   }
 }
+function readCredentialAccountId(): string | null {
+  try {
+    const raw = localStorage.getItem(JAZZ_SECRET_KEY)
+    return raw ? (JSON.parse(raw).accountID ?? null) : null
+  } catch {
+    return null
+  }
+}
+
 function hasOtherAccountBase(account: string): boolean {
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -137,52 +151,103 @@ type Phase = 'deciding' | 'synced' | 'blocked'
 interface Session {
   account: string
   phase: Phase
+  /** why 'blocked': waiting for the server, or a book this build can't read */
+  reason?: 'offline' | 'incompatible'
+}
+
+function unplaced(p: Project, id: string): Project {
+  if (!placedPhotoIds(p).includes(id)) return p
+  return {
+    ...p,
+    spreads: p.spreads.map((s) => ({
+      ...s,
+      left: s.left.photoId === id ? { ...s.left, photoId: null } : s.left,
+      right: s.right.photoId === id ? { ...s.right, photoId: null } : s.right,
+    })),
+  }
 }
 
 /**
  * Bridges App state <-> the Jazz account root.
  *
  * Contract (see AGENTS.md "Sync"):
- * - Only thumbnails travel. A remote delete (tombstone) removes a photo from
- *   this device only if this device holds just the thumbnail; a held original
- *   is unplaced and kept in the tray. Placing it again revives the tombstone.
+ * - Only thumbnails travel. A remote delete (tombstone) unplaces the photo
+ *   here; a thumbnail-only copy is then removed, a held original stays in
+ *   the tray. Placing a held photo again revives the tombstone.
  * - Per account the bootstrap decides *imperatively* (it pushes or applies
- *   right away, so the incremental effects never get to reverse it): equal →
- *   nothing; this device unchanged since last sync → cloud wins; cloud empty,
- *   untouched or unchanged since last sync → this device wins; this device
- *   has no placed photos → cloud wins; both changed → ask.
+ *   right away, so the incremental effects never get to reverse it), and
+ *   only once the sync server is reachable: equal → nothing; this device
+ *   unchanged since last sync → cloud wins; cloud empty, untouched or
+ *   unchanged since last sync → this device wins (only if it has placed
+ *   photos); this device has no placed photos → cloud wins; both changed →
+ *   ask.
  * - All bookkeeping resets when the account id changes.
  */
 export function useProjectSync({ project, setProject, updateProject, photos, setPhotos }: Args): ProjectSync {
   const authenticated = useIsAuthenticated()
   const me = useAccount(SeqAccount, { resolve: RESOLVE })
   const jazzLogOut = useLogOut() as unknown as () => Promise<void>
-  const loaded = authenticated && me.$isLoaded ? me : null
+  const context = useJazzContextValue()
+  // Right after a login the auth flag flips before Jazz has swapped the
+  // context: `me` is still the previous (anonymous) account for a moment.
+  // Only the account the stored credentials name counts as "signed in".
+  const credentialId = readCredentialAccountId()
+  const mismatch = authenticated && me.$isLoaded && me.$jazz.id !== credentialId
+  const loaded = authenticated && me.$isLoaded && !mismatch ? me : null
+
+  // If the running account and the stored credentials disagree for more than
+  // a moment (seen in development with StrictMode's double effects: two
+  // anonymous accounts get created and the credentials name the other one),
+  // reload once: Jazz then starts from the credentials and the two agree.
+  useEffect(() => {
+    if (!mismatch) return
+    const timer = window.setTimeout(() => {
+      try {
+        if (sessionStorage.getItem('sequences-sync-reloaded')) {
+          console.error('sync: running account differs from the stored credentials; not syncing')
+          return
+        }
+        sessionStorage.setItem('sequences-sync-reloaded', '1')
+      } catch {
+        /* ignore */
+      }
+      location.reload()
+    }, 3_000)
+    return () => window.clearTimeout(timer)
+  }, [mismatch])
   const accountId = loaded ? loaded.$jazz.id : null
   const root = loaded ? loaded.root : undefined
 
   const [session, setSession] = useState<Session | null>(null)
   const [pending, setPending] = useState<MergePrompt | null>(null)
-  /** bumped by a timer when a failed thumb download is due for another attempt */
+  /** bumped by a timer when something is due for another attempt without any other change */
   const [retryTick, setRetryTick] = useState(0)
 
   const lastPushed = useRef<string | null>(null)
   const lastRemoteApplied = useRef<string | null>(null)
-  /** a local edit is waiting for the push debounce; remote changes must not discard it */
-  const pendingPush = useRef(false)
+  /**
+   * The project changed here (user edit, tombstone unplace) and that change
+   * hasn't been pushed yet. Only a dirty project is pushed — never "local
+   * differs from cloud", which would re-push after every remote change and
+   * make two devices overwrite each other forever — and while dirty, a
+   * remote change is not applied over the pending edit.
+   */
+  const dirty = useRef(false)
   const uploading = useRef(new Set<string>())
   const downloading = useRef(new Set<string>())
   /** ids deleted locally before their remote entry existed or was loaded */
   const deletedLocally = useRef(new Set<string>())
   /** tombstones this device has already acted on (unplace happens once per transition) */
   const handledTombstones = useRef(new Set<string>())
-  /** thumb downloads that failed: attempt count and when to try again */
-  const thumbFailures = useRef(new Map<string, { attempts: number; nextAt: number }>())
+  /** ids this device placed itself since the last push; only these may revive a tombstone */
+  const placedHere = useRef(new Set<string>())
+  /** loads that failed (entry or legacy thumb stream): attempt count and when to try again */
+  const loadFailures = useRef(new Map<string, { attempts: number; nextAt: number }>())
   const bootstrappedFor = useRef<string | null>(null)
+  const wasOffline = useRef(false)
 
   // latest values for async work and callbacks
   const projectRef = useRef(project)
-  projectRef.current = project
   const photosRef = useRef(photos)
   photosRef.current = photos
   const accountRef = useRef(accountId)
@@ -190,11 +255,71 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
   const authRef = useRef(authenticated)
   authRef.current = authenticated
 
+  // a project change that did not come from applyRemote is a local edit:
+  // it makes the project dirty, and ids newly placed with a photo this
+  // device holds may revive a tombstone
+  const appliedProject = useRef<Project | null>(null)
+  if (projectRef.current !== project) {
+    if (project && projectRef.current && project !== appliedProject.current) {
+      dirty.current = true
+      const before = new Set(placedPhotoIds(projectRef.current))
+      for (const id of placedPhotoIds(project)) if (!before.has(id) && photos.has(id)) placedHere.current.add(id)
+    }
+    projectRef.current = project
+  }
+
+  /**
+   * Has the sync server told us what it knows about the root? A peer object
+   * exists while the socket is still connecting (or failing), so "not closed"
+   * alone would say yes while offline; a known state only arrives over a
+   * working connection.
+   */
+  const waitingSince = useRef<number | null>(null)
+  const connected = useCallback(() => {
+    type KnownState = { sessions?: Record<string, number> }
+    type Peer = { closed: boolean; getKnownState?: (id: string) => KnownState | undefined }
+    type Core = { knownState?: () => KnownState }
+    const node = (context as { node?: { syncManager?: { getServerPeers?: (id: string) => Peer[] } } }).node
+    if (!root) return false
+    const id = root.$jazz.id
+    const peers = node?.syncManager?.getServerPeers?.(id)
+    const open = !!peers && peers.some((p) => !p.closed)
+    const informed = peers?.find((p) => !p.closed && p.getKnownState?.(id) != null)
+    if (informed) {
+      // The server told us what it has. If it holds transactions for the root
+      // that haven't reached us yet, deciding now would be deciding on a stale
+      // (or empty) book: wait for them.
+      const server = informed.getKnownState!(id)?.sessions ?? {}
+      const local = (root.$jazz.raw as unknown as { core?: Core }).core?.knownState?.()?.sessions ?? {}
+      const behind = Object.entries(server).some(([session, count]) => (local[session] ?? 0) < count)
+      if (!behind) return true
+      waitingSince.current ??= Date.now()
+      return Date.now() - waitingSince.current > 8_000
+    }
+    // an open socket that never reports a known state for the root (it can
+    // happen for a root created a moment ago) must not block forever
+    if (open) {
+      waitingSince.current ??= Date.now()
+      return Date.now() - waitingSince.current > 8_000
+    }
+    waitingSince.current = null
+    return false
+  }, [context, root])
+
   const logOut = useCallback(async () => {
     await jazzLogOut()
     for (let i = 0; i < 30 && authRef.current; i++) await sleep(100)
     if (authRef.current) throw new Error('logout did not complete')
   }, [jazzLogOut])
+
+  // another tab performed a this-device operation: leave the account here too
+  useEffect(
+    () =>
+      onSyncEvent((type) => {
+        if (type === 'logout' && authRef.current) jazzLogOut().catch(() => {})
+      }),
+    [jazzLogOut],
+  )
 
   const applyRemote = useCallback(
     (json: string, parsed: Project) => {
@@ -202,25 +327,34 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
       // once something else has been applied, our last push is history:
       // the other device may legitimately return to that exact state
       lastPushed.current = null
+      placedHere.current.clear()
+      dirty.current = false
+      appliedProject.current = parsed
       if (accountRef.current) writeBase(accountRef.current, json)
       setProject(parsed)
     },
     [setProject],
   )
 
-  /** write this device's project to the cloud now, reviving any tombstoned photo it places */
+  /**
+   * Write this device's project to the cloud now. A tombstoned photo is
+   * revived only if the user placed it here (a stale id inherited from a
+   * pulled project must not resurrect a photo deleted elsewhere).
+   */
   const pushNow = useCallback((r: NonNullable<typeof root>, local: Project) => {
     const json = encode(local)
     const rp = r.photos
     if (rp) {
       for (const id of placedPhotoIds(local)) {
+        if (!placedHere.current.has(id) || !photosRef.current.has(id)) continue
         const entry = rp[id]
         if (entry?.$isLoaded && entry.deleted) entry.$jazz.set('deleted', false)
       }
     }
+    placedHere.current.clear()
     lastPushed.current = json
     lastRemoteApplied.current = null
-    pendingPush.current = false
+    dirty.current = false
     r.$jazz.set('projectJson', json)
     if (accountRef.current) writeBase(accountRef.current, json)
   }, [])
@@ -230,6 +364,7 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
     if (!accountId || !root) {
       setSession(null)
       setPending(null)
+      setSyncStatus({ incompatible: false, offline: false })
       return
     }
     if (session?.account === accountId) return
@@ -241,36 +376,72 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
       uploading.current.clear()
       downloading.current.clear()
       handledTombstones.current.clear()
-      thumbFailures.current.clear()
+      placedHere.current.clear()
+      loadFailures.current.clear()
       if (bootstrappedFor.current !== null) deletedLocally.current.clear()
       bootstrappedFor.current = accountId
     }
 
-    const remoteJson = root.projectJson
-    const local = projectRef.current
-    const localJson = local ? encode(local) : ''
-    const remote = decode(remoteJson)
-    const base = readBase(accountId)
-    const localPlaced = local ? placedPhotoIds(local).length : 0
+    // A device that synced this account before holds a cached root. Without a
+    // connection that cache is all Jazz can show, and "unchanged since last
+    // sync" would be a lie that overwrites the cloud once we reconnect: decide
+    // only against the server's state. A first contact has no cache to be
+    // fooled by (the root comes from the server, or is ours to create).
+    if (readBase(accountId) !== null && !connected()) {
+      wasOffline.current = true
+      setSyncStatus({ offline: true })
+      setSession({ account: accountId, phase: 'blocked', reason: 'offline' })
+      return
+    }
+    setSyncStatus({ offline: false })
 
     let cancelled = false
     ;(async () => {
+      if (wasOffline.current) {
+        wasOffline.current = false
+        await sleep(CONNECT_GRACE)
+        if (cancelled) return
+      }
+      const base = readBase(accountId)
+      if (
+        base === null &&
+        !createdHere.has(accountId) &&
+        !root.projectJson &&
+        Object.keys(root.photos ?? {}).length === 0
+      ) {
+        // First time this device sees the account and the root looks blank.
+        // Content can still be on its way from the server; a decision made
+        // on a blank root would push this device's book over the real one.
+        // Wait for content, up to a generous limit for a genuinely empty account.
+        const until = Date.now() + BLANK_ROOT_WAIT
+        while (Date.now() < until && !root.projectJson && Object.keys(root.photos ?? {}).length === 0) {
+          await sleep(200)
+          if (cancelled) return
+        }
+      }
+      const remoteJson = root.projectJson
+      const local = projectRef.current
+      const localJson = local ? encode(local) : ''
+      const remote = decode(remoteJson)
+      const localPlaced = local ? placedPhotoIds(local).length : 0
+
       if (!remote.ok && remote.reason !== 'empty') {
         // a book we can't read: never overwrite it, never pull it
         console.warn('sync: cloud project is', remote.reason, '; sync paused on this device')
         setSyncStatus({ incompatible: remote.reason === 'newer' })
-        setSession({ account: accountId, phase: 'blocked' })
+        setSession({ account: accountId, phase: 'blocked', reason: 'incompatible' })
         return
       }
       setSyncStatus({ incompatible: false })
 
       if (remote.ok && remoteJson === localJson) {
+        writeBase(accountId, remoteJson)
         setSession({ account: accountId, phase: 'synced' })
         return
       }
       if (!remote.ok) {
-        // empty account. If this device carries traces of another account
-        // (its merge base, or thumbnail-only photos), don't upload silently.
+        // empty account. If this device carries what a previous login left
+        // (thumbnail-only photos, another account's merge base), ask first.
         const thumbOnly = photosRef.current.size > 0 && (await db.loadPhotos()).some((r) => r.hasOriginal === false)
         if (cancelled) return
         if (local && photosRef.current.size > 0 && (thumbOnly || hasOtherAccountBase(accountId))) {
@@ -278,10 +449,10 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
           setSession({ account: accountId, phase: 'deciding' })
           return
         }
-        // An empty book is not worth writing: another device's first push
-        // may still be on its way to the server, and last-write-wins would
-        // let this blank overwrite it. Edits made later are pushed as usual.
-        if (local && (localPlaced > 0 || photosRef.current.size > 0)) pushNow(root, local)
+        // A sequence with nothing placed is not worth writing: another device's
+        // first push may still be on its way, and last-write-wins would let this
+        // blank overwrite it. Photos upload through the photo effect regardless.
+        if (local && localPlaced > 0) pushNow(root, local)
         setSession({ account: accountId, phase: 'synced' })
         return
       }
@@ -303,7 +474,18 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
     return () => {
       cancelled = true
     }
-  }, [accountId, root, session?.account, applyRemote, pushNow])
+  }, [accountId, root, session?.account, applyRemote, pushNow, connected])
+
+  // while waiting for the server, look again regularly; a re-run of the
+  // bootstrap decides as soon as the root has exchanged state with it
+  const waitingForServer = Boolean(session && session.account === accountId && session.reason === 'offline')
+  useEffect(() => {
+    if (!waitingForServer) return
+    const timer = window.setInterval(() => {
+      if (connected()) setSession(null)
+    }, OFFLINE_POLL)
+    return () => window.clearInterval(timer)
+  }, [waitingForServer, connected])
 
   const deciding = Boolean(root && session && session.account === accountId && session.phase === 'deciding')
   const synced = Boolean(root && session && session.account === accountId && session.phase === 'synced')
@@ -354,7 +536,7 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
     // The user just did something here and the push hasn't gone out yet:
     // their action wins over whatever arrived meanwhile (the push will carry
     // it to the other device). Whole-document LWW; see AGENTS.md.
-    if (pendingPush.current) return
+    if (dirty.current) return
     const remote = decode(remoteJson)
     if (!remote.ok) {
       console.warn('sync: ignoring cloud project:', remote.reason)
@@ -366,25 +548,24 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
 
   // ---- 2b. project: push (debounced) ----
   useEffect(() => {
-    pendingPush.current = false
-    if (!synced || !root || !project) return
+    if (!synced || !root || !project || !dirty.current) return
     const json = encode(project)
-    if (json === root.projectJson) return
-    // a blank book has nothing to tell an empty account (and another device's
-    // first push may be on its way; last-write-wins must not let this blank win)
-    if (!root.projectJson && placedPhotoIds(project).length === 0 && photosRef.current.size === 0) return
-    // don't echo a state we just received; cleared after the first real push
-    // so that reverting to that state later is pushed too
-    if (json === lastRemoteApplied.current) return
-    pendingPush.current = true
+    if (json === root.projectJson) {
+      dirty.current = false
+      return
+    }
+    // a sequence with nothing placed has nothing to tell an empty account
+    // (another device's first push may be on its way; LWW must not let this blank win)
+    if (!root.projectJson && placedPhotoIds(project).length === 0) return
     const timer = window.setTimeout(() => pushNow(root, project), 300)
     return () => window.clearTimeout(timer)
   }, [synced, root, project, pushNow])
 
   // ---- 2c. photos: reconcile ----
+  /** forget the view; the record goes only if it is a thumbnail-only copy (checked in one transaction) */
   const dropLocal = useCallback(
     (id: string) => {
-      db.deletePhoto(id)
+      db.deletePhotoIfThumbOnly(id).catch((err) => console.error('sync: drop failed', id, err))
       setPhotos((prev) => {
         const victim = prev.get(id)
         if (!victim) return prev
@@ -397,22 +578,7 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
     [setPhotos],
   )
 
-  const unplace = useCallback(
-    (id: string) => {
-      updateProject((p) => {
-        if (!placedPhotoIds(p).includes(id)) return p
-        return {
-          ...p,
-          spreads: p.spreads.map((s) => ({
-            ...s,
-            left: s.left.photoId === id ? { ...s.left, photoId: null } : s.left,
-            right: s.right.photoId === id ? { ...s.right, photoId: null } : s.right,
-          })),
-        }
-      })
-    },
-    [updateProject],
-  )
+  const unplace = useCallback((id: string) => updateProject((p) => unplaced(p, id)), [updateProject])
 
   useEffect(() => {
     if (!synced || !root || !remotePhotos) return
@@ -422,12 +588,37 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
     let toDownload = 0
     let toUpload = 0
     const heldTombstones: string[] = []
-    /** when to run again without any other change (tombstone re-check, download retry) */
+    /** when to run again without any other change (tombstone re-check, load retry) */
     let recheckAt = Infinity
+    const dueForRetry = (id: string) => {
+      const f = loadFailures.current.get(id)
+      if (!f) return true
+      if (f.attempts >= THUMB_MAX_ATTEMPTS) return false
+      if (f.nextAt > now) {
+        recheckAt = Math.min(recheckAt, f.nextAt)
+        return false
+      }
+      return true
+    }
+    const noteFailure = (id: string) => {
+      const attempts = (loadFailures.current.get(id)?.attempts ?? 0) + 1
+      loadFailures.current.set(id, { attempts, nextAt: Date.now() + retryDelay(attempts) })
+    }
 
     for (const id of remoteIds) {
       const entry = remotePhotos[id]
-      if (!entry?.$isLoaded) continue
+
+      if (!entry?.$isLoaded) {
+        // unreadable or not yet delivered: count it and nudge a load with backoff
+        if (!photos.has(id)) toDownload++
+        const refId = remotePhotos.$jazz.refs[id]?.id
+        if (refId && dueForRetry(id)) {
+          noteFailure(id)
+          SyncPhoto.load(refId).catch(() => {})
+        }
+        continue
+      }
+      loadFailures.current.delete(id)
 
       if (deletedLocally.current.has(id)) {
         // deleted here before the entry existed / loaded: tombstone it now,
@@ -438,12 +629,16 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
       }
 
       if (entry.deleted) {
-        if (!photos.has(id)) continue
+        // a stale placement inherited from a pulled project must not keep
+        // the id alive in the sequence
+        if (!photos.has(id)) {
+          if (projectRef.current && placedPhotoIds(projectRef.current).includes(id)) unplace(id)
+          continue
+        }
         heldTombstones.push(id)
-        // a thumbnail-only copy (or a record another tab already removed)
-        // goes — checked on every run, since the other tab's IndexedDB write
-        // may land after the tombstone; a held original is unplaced once
-        // and kept (placing it again is the revive)
+        // the thumbnail-only copy goes (checked on every run, in one IDB
+        // transaction, so another tab's write can't be swept away); a held
+        // original is unplaced once and kept
         const firstTime = !handledTombstones.current.has(id)
         handledTombstones.current.add(id)
         if (firstTime) recheckAt = Math.min(recheckAt, now + 1_500)
@@ -452,21 +647,23 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
           if (accountRef.current !== forAccount) return
           const fresh = remotePhotos[id]
           if (!fresh?.$isLoaded || !fresh.deleted) return // revived meanwhile
-          if (!rec || rec.hasOriginal === false) dropLocal(id)
-          else if (firstTime) unplace(id)
+          if (!rec || rec.hasOriginal === false) {
+            unplace(id)
+            dropLocal(id)
+          } else if (firstTime) {
+            unplace(id)
+          }
         })()
         continue
       }
       handledTombstones.current.delete(id)
 
       if (photos.has(id) || uploading.current.has(id)) continue
-      const failure = thumbFailures.current.get(id)
-      if (failure && (failure.attempts >= THUMB_MAX_ATTEMPTS || failure.nextAt > now)) continue
       const inline = entry.thumbData
       const thumbId = inline ? undefined : entry.$jazz.refs.thumb?.id
       if (!inline && !thumbId) continue
       toDownload++
-      if (downloading.current.has(id)) continue
+      if (!dueForRetry(id) || downloading.current.has(id)) continue
       downloading.current.add(id)
       ;(async () => {
         let done = false
@@ -479,12 +676,10 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
               blob = base64ToBlob(inline)
             } else if (thumbId) {
               // legacy entries that still point at a FileStream
-              const started = Date.now()
               blob = await Promise.race([
                 co.fileStream().loadAsBlob(thumbId),
                 sleep(THUMB_LOAD_TIMEOUT).then(() => undefined),
               ])
-              if (!blob) console.warn('sync: thumb unavailable', id, `after ${Date.now() - started}ms`)
             }
             if (!blob) return // retried with backoff
             if (accountRef.current !== forAccount || deletedLocally.current.has(id)) return
@@ -510,12 +705,8 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
           console.error('sync: download failed', id, err)
         } finally {
           downloading.current.delete(id)
-          if (done) thumbFailures.current.delete(id)
-          else {
-            const prev = thumbFailures.current.get(id)
-            const attempts = (prev?.attempts ?? 0) + 1
-            thumbFailures.current.set(id, { attempts, nextAt: Date.now() + thumbRetryDelay(attempts) })
-          }
+          if (done) loadFailures.current.delete(id)
+          else noteFailure(id)
         }
       })()
     }
@@ -550,10 +741,6 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
 
     setSyncStatus({ toUpload, toDownload, remoteDeleted: heldTombstones })
 
-    // failed downloads are retried on a timer, not only when something else changes
-    for (const [id, f] of thumbFailures.current) {
-      if (f.attempts < THUMB_MAX_ATTEMPTS && remoteIds.has(id) && !photos.has(id)) recheckAt = Math.min(recheckAt, f.nextAt)
-    }
     if (recheckAt === Infinity) return
     const timer = window.setTimeout(() => setRetryTick((t) => t + 1), Math.max(0, recheckAt - Date.now()) + 50)
     return () => window.clearTimeout(timer)
@@ -566,6 +753,7 @@ export function useProjectSync({ project, setProject, updateProject, photos, set
 
   const removePhoto = useCallback(
     (id: string) => {
+      placedHere.current.delete(id)
       const entry = synced && remotePhotos ? remotePhotos[id] : undefined
       if (entry?.$isLoaded) {
         if (!entry.deleted) entry.$jazz.set('deleted', true)

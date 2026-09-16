@@ -59,7 +59,8 @@ npm run dev
 React + TypeScript + Vite로 만들었습니다. 원본 사진은 브라우저 밖으로 나가지
 않습니다.
 
-동기화는 빌드에 `VITE_JAZZ_API_KEY`([Jazz](https://jazz.tools) Cloud 키)가
+동기화는 빌드에 `VITE_JAZZ_API_KEY`([Jazz](https://jazz.tools) Cloud 키)나
+`VITE_JAZZ_SYNC_PEER`(직접 띄운 동기화 서버, 테스트는 로컬 서버를 씀)가
 있을 때만 켜집니다. 그러면 "동기화" 버튼이 생기고, 패스키나 복구 문구로
 로그인하기 전까지는 아무것도 올라가지 않으며, 올라가는 것도 시퀀스와 600px
 이하 썸네일뿐입니다.

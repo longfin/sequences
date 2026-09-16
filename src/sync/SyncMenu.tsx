@@ -1,8 +1,25 @@
+import { entropyToMnemonic } from '@scure/bip39'
 import { wordlist } from '@scure/bip39/wordlists/english'
 import { useLogOut, usePasskeyAuth, usePassphraseAuth } from 'jazz-tools/react'
 import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
-import { useSyncStatus } from './status'
+import { JAZZ_SECRET_KEY, useSyncStatus } from './status'
+
+/**
+ * The phrase of the account signed in *right now*, from the stored seed.
+ * `usePassphraseAuth().passphrase` is read once when the hook subscribes and
+ * goes stale after log out + new sign-up: it would show the previous
+ * account's phrase, which is the one thing a user must never write down.
+ */
+function currentPhrase(): string {
+  try {
+    const raw = localStorage.getItem(JAZZ_SECRET_KEY)
+    const seed: number[] | undefined = raw ? JSON.parse(raw).secretSeed : undefined
+    return seed ? entropyToMnemonic(new Uint8Array(seed), wordlist) : ''
+  } catch {
+    return ''
+  }
+}
 
 /**
  * Toolbar popover for turning sync on/off.
@@ -24,7 +41,13 @@ export function SyncMenu() {
   const logOut = useLogOut()
   const signedIn = passkey.state === 'signedIn'
   const status = useSyncStatus()
-  const label = !signedIn ? t('sync') : status.active ? t('syncOn') : t('syncConnecting')
+  const label = !signedIn
+    ? t('sync')
+    : status.active
+      ? t('syncOn')
+      : status.offline
+        ? t('syncOffline')
+        : t('syncConnecting')
 
   useEffect(() => {
     if (!open) return
@@ -79,7 +102,7 @@ export function SyncMenu() {
                   <textarea
                     className="sync-phrase"
                     readOnly
-                    value={phrase.passphrase}
+                    value={currentPhrase() || phrase.passphrase}
                     rows={4}
                     spellCheck={false}
                     autoComplete="off"

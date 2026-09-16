@@ -3,7 +3,9 @@ name: Test
 on:
   pull_request:
   push:
-    branches-ignore: [main]
+
+permissions:
+  contents: read
 
 jobs:
   e2e:
@@ -17,7 +19,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npx playwright install --with-deps chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
+        if: steps.pw-cache.outputs.cache-hit == 'true'
       # two-device sync scenarios against a local in-memory Jazz sync server
       - run: npm test
       - uses: actions/upload-artifact@v4

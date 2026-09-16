@@ -16,7 +16,7 @@ export const SYNC_ENABLED = API_KEY.length > 0 || PEER.length > 0
 export const SyncProvider = lazy(() => import('./jazz').then((m) => ({ default: m.SyncProvider })))
 export const SyncBridge = lazy(() => import('./jazz').then((m) => ({ default: m.SyncBridge })))
 
-export { JAZZ_SECRET_KEY, clearSyncBase, useSyncStatus } from './status'
+export { JAZZ_SECRET_KEY, clearSyncBase, onSyncEvent, postSyncEvent, useSyncStatus } from './status'
 export type { ProjectSync } from './useProjectSync'
 
 /**

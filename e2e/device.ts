@@ -5,10 +5,23 @@ export interface DeviceState {
   sync: string | null
   tray: string[]
   placed: string[]
+  /** "<spread>/<side>" → photo name, for every filled slot */
+  slots: Record<string, string>
   dialog: boolean
   cards: number
   chips: string[]
 }
+
+type Expected = Partial<{
+  tray: string[]
+  placed: string[]
+  slots: Record<string, string>
+  dialog: boolean
+  chips: string[]
+  sync: RegExp
+}>
+
+const sync = /^(Sync|동기화|同期)/
 
 /**
  * One "device": its own browser context (isolated IndexedDB + localStorage)
@@ -28,8 +41,7 @@ export class Device {
     const page = await context.newPage()
     const device = new Device(name, context, page)
     await device.prepare(page)
-    await page.goto('/')
-    await page.locator('.spread-card').first().waitFor()
+    await device.load(page)
     return device
   }
 
@@ -37,9 +49,17 @@ export class Device {
   async newTab(): Promise<Page> {
     const page = await this.context.newPage()
     await this.prepare(page)
+    await this.load(page)
+    return page
+  }
+
+  private async load(page: Page) {
     await page.goto('/')
     await page.locator('.spread-card').first().waitFor()
-    return page
+    // the Sync button is a disabled placeholder until the lazy Jazz chunk has
+    // mounted; on a cold dev server that compile can take seconds, and it must
+    // not eat into the timing-sensitive steps of a test
+    await expect(this.syncButton(page)).toBeEnabled({ timeout: 60_000 })
   }
 
   private async prepare(page: Page) {
@@ -58,35 +78,17 @@ export class Device {
     await this.context.close()
   }
 
+  /** cut / restore the network (the app origin keeps working through Playwright's own channel) */
+  async offline(on: boolean) {
+    await this.context.setOffline(on)
+  }
+
   // ---- photos ----
 
   /** import synthetic JPEGs named `<name>.jpg` through the tray's file input */
   async importPhotos(names: string[], page: Page = this.page) {
     await this.dispatchImport(names, page)
-    try {
-      for (const name of names) await page.locator(`.tray-photo img[alt="${name}.jpg"]`).waitFor({ timeout: 10_000 })
-    } catch {
-      const diag = await page.evaluate(async () => {
-        const idb = await new Promise<IDBDatabase>((res, rej) => {
-          const r = indexedDB.open('sequences')
-          r.onsuccess = () => res(r.result)
-          r.onerror = () => rej(r.error)
-        })
-        const count = await new Promise<number>((res) => {
-          const r = idb.transaction('photos').objectStore('photos').count()
-          r.onsuccess = () => res(r.result)
-        })
-        return {
-          busy: document.querySelector('.busy')?.textContent ?? null,
-          idbPhotos: count,
-          tray: document.querySelectorAll('.tray-photo').length,
-          inert: document.querySelector('.app')?.hasAttribute('inert'),
-          input: !!document.querySelector('.tray input[type=file]'),
-        }
-      })
-      console.log(`[${this.name}] import of ${names.join(',')} did not show up; diagnostics:`, JSON.stringify(diag))
-      throw new Error(`import did not show up: ${JSON.stringify(diag)}`)
-    }
+    for (const name of names) await page.locator(`.tray-photo img[alt="${name}.jpg"]`).waitFor({ timeout: 15_000 })
   }
 
   /** JPEGs are drawn in the page (no encoder in Node) and handed to the input by Playwright */
@@ -151,10 +153,15 @@ export class Device {
     await print.locator('.tray-delete').click()
   }
 
+  /** the B&W toggle: a harmless project edit */
+  async toggleGrayscale(page: Page = this.page) {
+    await page.locator('.toolbar button', { hasText: /^(B&W|흑백|モノクロ)$/ }).click()
+  }
+
   // ---- sync menu ----
 
-  private syncButton(page: Page = this.page) {
-    return page.locator('.toolbar button', { hasText: /^(Sync|동기화|同期)/ }).first()
+  syncButton(page: Page = this.page) {
+    return page.locator('.toolbar button', { hasText: sync }).first()
   }
 
   private async openSync(page: Page = this.page) {
@@ -185,6 +192,15 @@ export class Device {
     await this.closeMenu(page)
   }
 
+  /** the signed-in account's recovery phrase, read from the menu */
+  async currentPhrase(page: Page = this.page): Promise<string> {
+    await this.openSync(page)
+    await page.locator('.sync-menu button', { hasText: /recovery|복구|リカバリー/ }).click()
+    const phrase = await page.locator('.sync-menu textarea.sync-phrase').inputValue()
+    await this.closeMenu(page)
+    return phrase
+  }
+
   async logOut(page: Page = this.page) {
     await this.openSync(page)
     await page.locator('.sync-menu button', { hasText: /log out|로그아웃|ログアウト/ }).click()
@@ -193,6 +209,10 @@ export class Device {
 
   async waitSynced(page: Page = this.page) {
     await expect(this.syncButton(page)).toHaveText(/Sync on|동기화 켜짐|同期オン/)
+  }
+
+  async waitAnonymous(page: Page = this.page) {
+    await expect(this.syncButton(page)).toHaveText(/^(Sync|동기화|同期)$/)
   }
 
   /** File → Reset, then wait until the local store is really empty (logout happens first and takes a moment) */
@@ -232,10 +252,10 @@ export class Device {
 
   async choose(which: 'remote' | 'local' | 'cancel' | 'upload', page: Page = this.page) {
     const re = {
-      remote: /cloud sequence|클라우드 시퀀스|クラウドのシーケンス/,
-      local: /this device’s sequence|이 기기 시퀀스|このデバイスのシーケンス/,
+      remote: /^(Keep the cloud|클라우드 시퀀스 유지|クラウドのシーケンスを残す)/,
+      local: /^(Keep this device|이 기기 시퀀스 유지|このデバイスのシーケンスを残す)/,
       upload: /^(Upload|올리기|アップロード)$/,
-      cancel: /Cancel|취소|キャンセル/,
+      cancel: /^(Cancel|취소|キャンセル)/,
     }[which]
     await this.dialog(page).locator('button', { hasText: re }).click()
   }
@@ -243,23 +263,43 @@ export class Device {
   // ---- state ----
 
   async state(page: Page = this.page): Promise<DeviceState> {
-    return page.evaluate(() => ({
-      sync:
-        [...document.querySelectorAll('.toolbar button')].find((b) => /^(Sync|동기화|同期)/.test(b.textContent ?? ''))
-          ?.textContent ?? null,
-      tray: [...document.querySelectorAll<HTMLImageElement>('.tray-photo img')].map((i) => i.alt),
-      placed: [...document.querySelectorAll<HTMLImageElement>('.page-slot.filled img')].map((i) => i.alt),
-      dialog: !!document.querySelector('.sync-dialog'),
-      cards: document.querySelectorAll('.spread-card').length,
-      chips: [...document.querySelectorAll('.tray-photo')]
-        .filter((p) => p.querySelector('.tray-chip'))
-        .map((p) => p.querySelector('img')!.alt),
-    }))
+    return page.evaluate(() => {
+      const slots: Record<string, string> = {}
+      document.querySelectorAll('.spread-card').forEach((card, i) => {
+        for (const side of ['left', 'right']) {
+          const img = card.querySelector<HTMLImageElement>(`.page-slot.${side}.filled img`)
+          if (img) slots[`${i}/${side}`] = img.alt
+        }
+      })
+      return {
+        sync:
+          [...document.querySelectorAll('.toolbar button')].find((b) => /^(Sync|동기화|同期)/.test(b.textContent ?? ''))
+            ?.textContent ?? null,
+        tray: [...document.querySelectorAll<HTMLImageElement>('.tray-photo img')].map((i) => i.alt),
+        placed: Object.values(slots),
+        slots,
+        dialog: !!document.querySelector('.sync-dialog'),
+        cards: document.querySelectorAll('.spread-card').length,
+        chips: [...document.querySelectorAll('.tray-photo')]
+          .filter((p) => p.querySelector('.tray-chip'))
+          .map((p) => p.querySelector('img')!.alt),
+      }
+    })
   }
 
-  /** poll the UI until `expected` matches (tray/placed compared as sets) */
-  async expectState(expected: Partial<{ tray: string[]; placed: string[]; dialog: boolean; chips: string[] }>, page: Page = this.page) {
+  /** poll the UI until `expected` matches (lists compared as sets, slots exactly) */
+  async expectState(expected: Expected, page: Page = this.page, timeout = 20_000) {
+    try {
+      await this.pollState(expected, page, timeout)
+    } catch (err) {
+      const last = await this.state(page).catch(() => null)
+      throw new Error(`${this.name}: ${(err as Error).message}\nlast seen: ${JSON.stringify(last)}`)
+    }
+  }
+
+  private async pollState(expected: Expected, page: Page, timeout: number) {
     const norm = (a: string[]) => [...a].sort().join(',')
+    const jpg = (a: string[]) => norm(a.map((n) => `${n}.jpg`))
     await expect
       .poll(
         async () => {
@@ -267,17 +307,31 @@ export class Device {
           return {
             tray: norm(s.tray),
             placed: norm(s.placed),
+            slots: JSON.stringify(s.slots, Object.keys(s.slots).sort()),
             dialog: s.dialog,
             chips: norm(s.chips),
+            syncOk: expected.sync ? expected.sync.test(s.sync ?? '') : true,
+            // diagnostics, never asserted on
+            sync: s.sync,
+            cards: s.cards,
           }
         },
-        { timeout: 20_000, message: `${this.name} state` },
+        { timeout, message: `${this.name} state` },
       )
       .toMatchObject({
-        ...(expected.tray ? { tray: norm(expected.tray.map((n) => `${n}.jpg`)) } : {}),
-        ...(expected.placed ? { placed: norm(expected.placed.map((n) => `${n}.jpg`)) } : {}),
+        ...(expected.tray ? { tray: jpg(expected.tray) } : {}),
+        ...(expected.placed ? { placed: jpg(expected.placed) } : {}),
+        ...(expected.slots
+          ? {
+              slots: JSON.stringify(
+                Object.fromEntries(Object.entries(expected.slots).map(([k, v]) => [k, `${v}.jpg`])),
+                Object.keys(expected.slots).sort(),
+              ),
+            }
+          : {}),
         ...(expected.dialog !== undefined ? { dialog: expected.dialog } : {}),
-        ...(expected.chips ? { chips: norm(expected.chips.map((n) => `${n}.jpg`)) } : {}),
+        ...(expected.chips ? { chips: jpg(expected.chips) } : {}),
+        ...(expected.sync ? { syncOk: true } : {}),
       })
   }
 }

@@ -14,6 +14,8 @@ export interface SyncStatus {
   active: boolean
   /** signed in but not yet active (root loading, or the merge question is open) */
   signedIn: boolean
+  /** signed in but the sync server can't be reached; nothing is decided or written until it can */
+  offline: boolean
   /** the cloud book uses a newer format than this build understands */
   incompatible: boolean
   /** thumbnails still to send / receive */
@@ -28,6 +30,7 @@ let status: SyncStatus = {
   failed: false,
   active: false,
   signedIn: false,
+  offline: false,
   incompatible: false,
   toUpload: 0,
   toDownload: 0,
@@ -71,5 +74,40 @@ export function clearSyncBase() {
     keys.forEach((k) => localStorage.removeItem(k))
   } catch {
     /* storage unavailable */
+  }
+}
+
+/**
+ * Other tabs on this origin share IndexedDB and the Jazz session but run
+ * their own bridge. A this-device operation (Reset, Load, sign-out) tells
+ * them so they stop syncing and reload instead of writing stale state back.
+ */
+export type SyncEvent = 'logout' | 'reload'
+const CHANNEL = 'sequences-sync'
+// BroadcastChannel only skips the posting channel object, not the posting
+// tab: tag messages so a tab ignores its own
+const TAB_ID = Math.random().toString(36).slice(2)
+
+export function postSyncEvent(type: SyncEvent) {
+  try {
+    const ch = new BroadcastChannel(CHANNEL)
+    ch.postMessage({ type, from: TAB_ID })
+    ch.close()
+  } catch {
+    /* no BroadcastChannel */
+  }
+}
+
+export function onSyncEvent(handler: (type: SyncEvent) => void): () => void {
+  try {
+    const ch = new BroadcastChannel(CHANNEL)
+    ch.onmessage = (e) => {
+      const msg = e.data as { type?: SyncEvent; from?: string } | undefined
+      if (!msg || msg.from === TAB_ID) return
+      if (msg.type === 'logout' || msg.type === 'reload') handler(msg.type)
+    }
+    return () => ch.close()
+  } catch {
+    return () => {}
   }
 }

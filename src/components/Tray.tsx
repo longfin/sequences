@@ -16,7 +16,9 @@ interface Props {
 export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onDeletePhoto }: Props) {
   const { t } = useI18n()
   const [over, setOver] = useState(false)
+  const [explain, setExplain] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+  const anyRemoteDeleted = photos.some((p) => remoteDeleted?.has(p.id))
 
   function handleDragOver(e: DragEvent) {
     const drag = getDrag()
@@ -52,6 +54,12 @@ export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onD
           {t('trayLabel')} <em>{photos.length}</em>
         </span>
         <button onClick={() => fileInput.current?.click()}>{t('addPhotos')}</button>
+        {anyRemoteDeleted && (
+          // works without hover, so it reads on the iPad too
+          <button className="tray-note" onClick={() => setExplain((s) => !s)} aria-expanded={explain}>
+            {t('remoteDeletedNote')}
+          </button>
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -64,6 +72,7 @@ export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onD
           }}
         />
       </div>
+      {explain && anyRemoteDeleted && <p className="tray-explain">{t('remoteDeletedTitle')}</p>}
       <div className="tray-photos">
         {photos.length === 0 && <p className="tray-empty">{t('trayEmpty')}</p>}
         {photos.map((p) => (
@@ -83,11 +92,7 @@ export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onD
             <button className="tray-delete" title={t('deletePhoto')} onClick={() => onDeletePhoto(p.id)}>
               ×
             </button>
-            {remoteDeleted?.has(p.id) && (
-              <span className="tray-chip" title={t('remoteDeletedTitle')}>
-                {t('remoteDeleted')}
-              </span>
-            )}
+            {remoteDeleted?.has(p.id) && <span className="tray-chip">{t('remoteDeleted')}</span>}
           </div>
         ))}
       </div>

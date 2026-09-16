@@ -60,7 +60,8 @@ npm run dev
 Built with React + TypeScript + Vite. Original photos never leave the browser.
 
 Sync is off unless the build has a `VITE_JAZZ_API_KEY` (a [Jazz](https://jazz.tools)
-Cloud key). With it, a "Sync" button appears; nothing is uploaded until you
+Cloud key) or `VITE_JAZZ_SYNC_PEER` (your own sync server; the test suite uses a
+local one). With it, a "Sync" button appears; nothing is uploaded until you
 sign in with a passkey or a recovery phrase, and only the sequence and ≤600px
 thumbnails are synced.
 

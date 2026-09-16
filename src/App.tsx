@@ -25,6 +25,8 @@ import {
   SyncErrorBoundary,
   SyncProvider,
   clearSyncBase,
+  onSyncEvent,
+  postSyncEvent,
   useSyncStatus,
   type ProjectSync,
 } from './sync'
@@ -332,6 +334,7 @@ export default function App() {
       for (const rec of photos) await db.savePhoto(rec)
       replacePhotoViews(photos)
       setProject(parsed.project)
+      postSyncEvent('reload')
     } catch (err) {
       console.error(err)
       alert(t('invalidFile'))
@@ -350,6 +353,8 @@ export default function App() {
       await syncRef.current.logOut()
       // the next login must not mistake this device's fresh state for "unchanged"
       clearSyncBase()
+      // other tabs share the session and the store: they must stop syncing too
+      postSyncEvent('logout')
       return true
     } catch (err) {
       console.error(err)
@@ -358,10 +363,39 @@ export default function App() {
     }
   }
 
-  /** the Jazz subtree crashed: drop the session on this device so the user isn't stuck signed in */
-  function handleSyncFailedLogOut() {
+  // a this-device operation in another tab replaced the local store: pick it up
+  useEffect(
+    () =>
+      onSyncEvent((type) => {
+        if (type === 'reload') location.reload()
+      }),
+    [],
+  )
+
+  /**
+   * The Jazz subtree crashed and the user chose to leave the account on this
+   * device. Show the recovery phrase first: without it (or a passkey) the
+   * account is unreachable afterwards.
+   */
+  async function handleSyncFailedLogOut() {
+    let phrase = '—'
+    try {
+      const raw = localStorage.getItem(JAZZ_SECRET_KEY)
+      const seed: number[] | undefined = raw ? JSON.parse(raw).secretSeed : undefined
+      if (seed) {
+        const [{ entropyToMnemonic }, { wordlist }] = await Promise.all([
+          import('@scure/bip39'),
+          import('@scure/bip39/wordlists/english'),
+        ])
+        phrase = entropyToMnemonic(new Uint8Array(seed), wordlist)
+      }
+    } catch (err) {
+      console.error('sync: could not derive the recovery phrase', err)
+    }
+    if (!window.confirm(t('syncFailedLogOutConfirm', { phrase }))) return
     localStorage.removeItem(JAZZ_SECRET_KEY)
     clearSyncBase()
+    postSyncEvent('logout')
     location.reload()
   }
 
@@ -373,6 +407,7 @@ export default function App() {
     await db.clearAll()
     replacePhotoViews([])
     setProject(defaultProject())
+    postSyncEvent('reload')
   }
 
   // ---- export ----
@@ -507,9 +542,14 @@ export default function App() {
         {SYNC_ENABLED && (
           <div className="menu-wrap" ref={setMenuSlot}>
             {sync.failed ? (
-              <button className="danger-outline" onClick={handleSyncFailedLogOut} title={t('syncFailedTitle')}>
-                {t('syncFailed')}
-              </button>
+              // a stale chunk after a deploy is the usual cause: reload first,
+              // leaving the account is the explicit second choice
+              <>
+                <button className="danger-outline" onClick={() => location.reload()}>
+                  {t('syncFailedReload')}
+                </button>{' '}
+                <button onClick={handleSyncFailedLogOut}>{t('syncFailedLogOut')}</button>
+              </>
             ) : (
               !sync.loaded && <button disabled>{t('sync')}</button>
             )}

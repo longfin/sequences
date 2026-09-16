@@ -50,6 +50,22 @@ export async function deletePhoto(id: string): Promise<void> {
   await tx.done
 }
 
+/**
+ * Remove the record only if it is a thumbnail-only copy, checked inside the
+ * same transaction. Used when another device deleted the photo: an original
+ * that another tab may have just (re)written must never be swept away.
+ * Returns whether a record was removed.
+ */
+export async function deletePhotoIfThumbOnly(id: string): Promise<boolean> {
+  const db = await getDB()
+  const tx = db.transaction('photos', 'readwrite')
+  const rec: PhotoRecord | undefined = await tx.store.get(id)
+  const remove = !!rec && rec.hasOriginal === false
+  if (remove) await tx.store.delete(id)
+  await tx.done
+  return remove
+}
+
 export async function clearAll(): Promise<void> {
   const db = await getDB()
   const tx = db.transaction(['photos', 'project'], 'readwrite')

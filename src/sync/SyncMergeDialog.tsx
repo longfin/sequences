@@ -11,23 +11,26 @@ interface Props {
  * The login-time question. 'merge': this device and the account both
  * changed since they last agreed; only the sequence is chosen, photos are
  * merged either way. 'upload': the account is empty but this device holds
- * photos that look like another account's.
+ * photos that came through a previous login.
  *
- * Neither answer is a safe default, so nothing destructive is pre-focused:
- * focus starts on Cancel, Tab stays inside, Esc returns to Cancel.
+ * For 'merge' neither answer is a safe default, so focus starts on Cancel;
+ * for 'upload' the non-destructive answer is Upload, so it gets focus.
+ * Tab stays inside, Esc returns to Cancel, the app behind is inert.
  */
 export function SyncMergeDialog({ prompt, onChoose }: Props) {
   const { t } = useI18n()
   const box = useRef<HTMLDivElement>(null)
   const cancel = useRef<HTMLButtonElement>(null)
+  const safe = useRef<HTMLButtonElement>(null)
   const choose = useRef(onChoose)
   choose.current = onChoose
   const line = (s: MergeSummary) => t('syncMergeSummary', { spreads: s.spreads, placed: s.placed })
+  const upload = prompt.kind === 'upload'
 
   useEffect(() => {
     const app = document.querySelector('.app')
     app?.setAttribute('inert', '')
-    cancel.current?.focus()
+    ;(upload ? safe.current : cancel.current)?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -47,15 +50,16 @@ export function SyncMergeDialog({ prompt, onChoose }: Props) {
       document.removeEventListener('keydown', onKey)
       app?.removeAttribute('inert')
     }
-  }, [])
+  }, [upload])
 
-  const upload = prompt.kind === 'upload'
   return (
     <div className="sync-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="sync-merge-title">
       <div className="sync-dialog" ref={box}>
         <h2 id="sync-merge-title">{t(upload ? 'syncUploadTitle' : 'syncMergeTitle')}</h2>
         <p>{t(upload ? 'syncUploadBody' : 'syncMergeBody')}</p>
-        {!upload && (
+        {upload ? (
+          <p>{t('syncUploadHint')}</p>
+        ) : (
           <dl className="sync-merge-sides">
             <dt>{t('syncMergeThisDevice')}</dt>
             <dd>{line(prompt.local)}</dd>
@@ -65,7 +69,9 @@ export function SyncMergeDialog({ prompt, onChoose }: Props) {
         )}
         <div className="sync-dialog-actions">
           {upload ? (
-            <button onClick={() => choose.current('local')}>{t('syncUploadConfirm')}</button>
+            <button ref={safe} onClick={() => choose.current('local')}>
+              {t('syncUploadConfirm')}
+            </button>
           ) : (
             <>
               <button onClick={() => choose.current('remote')}>{t('syncMergeTakeRemote')}</button>

@@ -36,7 +36,16 @@ export function SyncBridge({ apiRef, menuSlot, ...args }: Props) {
   useLayoutEffect(() => {
     setSyncStatus({ loaded: true })
     return () =>
-      setSyncStatus({ loaded: false, active: false, signedIn: false, toUpload: 0, toDownload: 0, remoteDeleted: [] })
+      setSyncStatus({
+        loaded: false,
+        active: false,
+        signedIn: false,
+        offline: false,
+        incompatible: false,
+        toUpload: 0,
+        toDownload: 0,
+        remoteDeleted: [],
+      })
   }, [])
   return (
     <>
