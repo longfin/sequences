@@ -1,25 +1,9 @@
-import { entropyToMnemonic } from '@scure/bip39'
 import { wordlist } from '@scure/bip39/wordlists/english'
 import { useLogOut, usePasskeyAuth, usePassphraseAuth } from 'jazz-tools/react'
 import { useEffect, useState } from 'react'
 import { useI18n } from '../i18n'
-import { JAZZ_SECRET_KEY, useSyncStatus } from './status'
-
-/**
- * The phrase of the account signed in *right now*, from the stored seed.
- * `usePassphraseAuth().passphrase` is read once when the hook subscribes and
- * goes stale after log out + new sign-up: it would show the previous
- * account's phrase, which is the one thing a user must never write down.
- */
-function currentPhrase(): string {
-  try {
-    const raw = localStorage.getItem(JAZZ_SECRET_KEY)
-    const seed: number[] | undefined = raw ? JSON.parse(raw).secretSeed : undefined
-    return seed ? entropyToMnemonic(new Uint8Array(seed), wordlist) : ''
-  } catch {
-    return ''
-  }
-}
+import { deriveRecoveryPhrase, readStoredCredentials } from './credentials'
+import { useSyncStatus } from './status'
 
 /**
  * Toolbar popover for turning sync on/off.
@@ -34,6 +18,8 @@ export function SyncMenu() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [showPhrase, setShowPhrase] = useState(false)
+  /** null while deriving; '' when this device holds no usable seed */
+  const [shownPhrase, setShownPhrase] = useState<string | null>(null)
   const [phraseInput, setPhraseInput] = useState('')
 
   const passkey = usePasskeyAuth({ appName: 'Sequences' })
@@ -60,6 +46,35 @@ export function SyncMenu() {
   useEffect(() => {
     if (!open || !signedIn) setShowPhrase(false)
   }, [open, signedIn])
+
+  // The phrase of the account signed in *right now*, from the stored seed
+  // (the same derivation the sign-out dialog uses). `usePassphraseAuth()
+  // .passphrase` is read once when the hook subscribes and goes stale after
+  // log out + new sign-up: it would show the previous account's phrase, which
+  // is the one thing a user must never write down.
+  useEffect(() => {
+    if (!showPhrase) {
+      setShownPhrase(null)
+      return
+    }
+    let cancelled = false
+    const seed = readStoredCredentials()?.secretSeed
+    if (!seed) {
+      setShownPhrase('')
+      return
+    }
+    deriveRecoveryPhrase(seed)
+      .then((p) => {
+        if (!cancelled) setShownPhrase(p)
+      })
+      .catch((err) => {
+        console.error('sync: could not derive the recovery phrase', err)
+        if (!cancelled) setShownPhrase('')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showPhrase])
 
   async function run(fn: () => Promise<unknown>) {
     setError(null)
@@ -96,21 +111,29 @@ export function SyncMenu() {
             <>
               <p className="sync-note">{t('syncNote')}</p>
               <button onClick={() => setShowPhrase((s) => !s)}>{t('syncShowPhrase')}</button>
-              {showPhrase && (
-                <>
-                  <p className="sync-note">{t('syncPhraseWarning')}</p>
-                  <textarea
-                    className="sync-phrase"
-                    readOnly
-                    value={currentPhrase() || phrase.passphrase}
-                    rows={4}
-                    spellCheck={false}
-                    autoComplete="off"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                  />
-                </>
-              )}
+              {showPhrase &&
+                shownPhrase !== null &&
+                // never fall back to another phrase (the anonymous account's,
+                // or a stale one from before a log out): a phrase that isn't
+                // this account's is worse than none at all
+                (shownPhrase ? (
+                  <>
+                    <p className="sync-note">{t('syncPhraseWarning')}</p>
+                    <textarea
+                      className="sync-phrase"
+                      readOnly
+                      value={shownPhrase}
+                      rows={4}
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      aria-label={t('syncPhraseLabel')}
+                    />
+                  </>
+                ) : (
+                  <p className="sync-error">{t('syncPhraseUnavailable')}</p>
+                ))}
               <div className="menu-sep" />
               <button className="danger" onClick={() => run(async () => logOut())}>
                 {t('syncLogOut')}

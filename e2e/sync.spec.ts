@@ -109,6 +109,11 @@ test('deletes: thumbnail copies go, held originals stay in the tray with a chip,
   await a.place('A', 1, 'left')
   await a.expectState({ slots: { '1/left': 'A' }, tray: [], chips: [] })
   await b.expectState({ slots: { '1/left': 'A' }, tray: [] })
+  // the revive has to hold: the tombstone handling must not take the photo
+  // back out of the sequence a beat after the poll first saw it
+  await a.page.waitForTimeout(1500)
+  await a.expectState({ slots: { '1/left': 'A' }, chips: [] })
+  await b.expectState({ slots: { '1/left': 'A' } })
   await close()
 })
 
@@ -229,6 +234,102 @@ test('a photos-only device logging in while another’s first push is in flight 
   await close()
 })
 
+test('a blank edit on a second device cannot blank the first device’s queued book', async ({ browser }) => {
+  // B is signed in with nothing placed and makes a project edit (the B&W
+  // toggle) while A's very first push is still queued offline. That edit is
+  // never written to an empty account — and it must not stop B from taking
+  // A's book when it finally lands, nor be pushed over it afterwards.
+  const { a, b, close } = await twoDevices(browser)
+  const phrase = await a.signUp() // empty book
+  await a.offline(true)
+  await a.importPhotos(['A'])
+  await a.place('A', 0, 'left') // queued until A is back online
+
+  await b.logIn(phrase)
+  await b.waitSynced()
+  await b.toggleGrayscale()
+  await b.page.waitForTimeout(800)
+
+  await a.offline(false)
+  await a.expectState({ slots: { '0/left': 'A' }, dialog: false }, a.page, 60_000)
+  await b.expectState({ slots: { '0/left': 'A' }, dialog: false }, b.page, 60_000)
+  // and it stays: no late push of B's blank sequence, no question either
+  await a.page.waitForTimeout(2000)
+  await a.expectState({ slots: { '0/left': 'A' }, dialog: false })
+  await b.expectState({ slots: { '0/left': 'A' }, dialog: false })
+  await close()
+})
+
+test('a blank edit made before logging in cannot blank the first device’s queued book', async ({ browser }) => {
+  const { a, b, close } = await twoDevices(browser)
+  const phrase = await a.signUp()
+  await a.offline(true)
+  await a.importPhotos(['A'])
+  await a.place('A', 0, 'left')
+
+  await b.toggleGrayscale() // dirty before the login, with nothing placed
+  await b.logIn(phrase)
+  await b.waitSynced()
+
+  await a.offline(false)
+  await a.expectState({ slots: { '0/left': 'A' }, dialog: false }, a.page, 60_000)
+  await b.expectState({ slots: { '0/left': 'A' }, dialog: false }, b.page, 60_000)
+  await a.page.waitForTimeout(2000)
+  await a.expectState({ slots: { '0/left': 'A' }, dialog: false })
+  await b.expectState({ slots: { '0/left': 'A' }, dialog: false })
+  await close()
+})
+
+test('what another device receives is thumbnail-only; the importer keeps the originals', async ({ browser }) => {
+  const { a, b, close } = await sharedBook(browser)
+  const received = await b.photoRecords()
+  test.expect(received.map((r) => r.name).sort()).toEqual(['A.jpg', 'B.jpg'])
+  test.expect(received.every((r) => r.hasOriginal === false)).toBe(true)
+  // nothing B holds is marked as deleted elsewhere
+  await b.expectState({ chips: [] })
+  const imported = await a.photoRecords()
+  test.expect(imported.every((r) => r.hasOriginal !== false)).toBe(true)
+  await close()
+})
+
+test('an edit made offline reaches the other device on reconnect, with no question asked', async ({ browser }) => {
+  const { a, b, close } = await sharedBook(browser)
+  await a.offline(true)
+  await a.unplace(0, 'left')
+  await a.place('A', 1, 'right')
+  await a.page.waitForTimeout(1000) // the push debounce runs while offline
+  await a.offline(false)
+
+  await b.expectState({ slots: { '1/right': 'A' }, tray: ['B'], dialog: false }, b.page, 60_000)
+  // A's own sequence is untouched by the reconnect, and nothing bounced back
+  await a.expectState({ slots: { '1/right': 'A' }, dialog: false })
+  await a.page.waitForTimeout(2000)
+  await a.expectState({ slots: { '1/right': 'A' }, dialog: false })
+  await b.expectState({ slots: { '1/right': 'A' }, dialog: false })
+  await close()
+})
+
+test('emptying the book on one device is not reverted by the other’s earlier offline edit', async ({ browser }) => {
+  // A edits while offline; B then takes the last photo off the pages. The
+  // later write wins the whole document (LWW): when A reconnects it must take
+  // B's empty sequence, not treat it as "nothing" and put its own back.
+  const { a, b, close } = await sharedBook(browser)
+  await a.offline(true)
+  await a.place('B', 1, 'right')
+  await a.page.waitForTimeout(1000) // the push debounce runs while offline
+  await b.unplace(0, 'left') // B's book is now empty, and this is the later edit
+  await b.expectState({ placed: [], tray: ['A', 'B'] })
+
+  await a.offline(false)
+  await a.expectState({ placed: [], tray: ['A', 'B'], dialog: false }, a.page, 60_000)
+  await b.expectState({ placed: [], tray: ['A', 'B'], dialog: false })
+  // and it holds: A's older edit is not pushed back over it
+  await a.page.waitForTimeout(2000)
+  await a.expectState({ placed: [], dialog: false })
+  await b.expectState({ placed: [], dialog: false })
+  await close()
+})
+
 test('logging in while the server is unreachable waits instead of deciding from the cache', async ({ browser }) => {
   const { a, b, phrase, close } = await sharedBook(browser)
   await a.logOut()
@@ -248,6 +349,63 @@ test('logging in while the server is unreachable waits instead of deciding from 
   await a.waitSynced()
   await a.expectState({ slots: { '1/right': 'A' }, tray: ['B'] })
   await b.expectState({ slots: { '1/right': 'A' }, tray: ['B'] })
+  await close()
+})
+
+test('the account’s creator, reloaded while the server is unreachable, waits instead of deciding from its cache', async ({ browser }) => {
+  // A created the account. That must not survive a reload as a licence to
+  // decide offline: A's cached root is stale as soon as B moves the book on,
+  // and a decision made on it ("unchanged since last sync" → push) would
+  // erase B's work on reconnect by last-write-wins. Only the page load that
+  // created the root is exempt from waiting for the server.
+  const { a, b, close } = await sharedBook(browser)
+  await a.blockSync(true)
+  await a.reload() // signed in, cached root, no server
+  await a.expectState({ sync: /waiting|대기|待ち/, slots: { '0/left': 'A' }, tray: ['B'], dialog: false })
+
+  await b.unplace(0, 'left')
+  await b.place('A', 1, 'right') // the cloud moves on
+  await b.expectState({ slots: { '1/right': 'A' }, tray: ['B'] })
+
+  await a.place('B', 1, 'left') // local work while waiting
+  await a.page.waitForTimeout(2500)
+  await a.expectState({ sync: /waiting|대기|待ち/, slots: { '0/left': 'A', '1/left': 'B' }, dialog: false })
+  await b.expectState({ slots: { '1/right': 'A' }, tray: ['B'], dialog: false })
+
+  // both changed since A last synced: the question, and nothing overwritten
+  // while it is open (the socket reconnects with backoff, so allow a while)
+  await a.blockSync(false)
+  await a.expectState({ dialog: true }, a.page, 60_000)
+  await b.expectState({ slots: { '1/right': 'A' }, tray: ['B'], dialog: false })
+  await a.choose('remote')
+  await a.waitSynced()
+  await a.expectState({ slots: { '1/right': 'A' }, tray: ['B'], dialog: false })
+  await b.expectState({ slots: { '1/right': 'A' }, tray: ['B'], dialog: false })
+  await close()
+})
+
+test('after reset, logging in offline waits instead of restoring from the Jazz cache', async ({ browser }) => {
+  // Reset forgets the merge base, but Jazz's own CoValue cache survives it:
+  // the old root can still answer while the server is unreachable. Nothing
+  // may be decided (or restored) from it.
+  const { a, phrase, close } = await sharedBook(browser)
+  await a.reset()
+  await a.expectState({ placed: [], tray: [] })
+
+  await a.offline(true)
+  await a.logIn(phrase)
+  await a.expectState({ sync: /waiting|대기|待ち/, placed: [], tray: [], dialog: false })
+  await a.page.waitForTimeout(4000)
+  await a.expectState({ sync: /waiting|대기|待ち/, placed: [], tray: [], dialog: false })
+
+  // once the server is reachable it resolves per the contract: this device
+  // has no placed photos, so the cloud wins and the book comes back
+  await a.offline(false)
+  await a.expectState(
+    { sync: /Sync on|동기화 켜짐|同期オン/, slots: { '0/left': 'A' }, tray: ['B'], dialog: false },
+    a.page,
+    60_000,
+  )
   await close()
 })
 

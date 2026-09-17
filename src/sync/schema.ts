@@ -1,4 +1,5 @@
 import { co, z } from 'jazz-tools'
+import { noteCreatedHere, setSyncStatus } from './status'
 
 /**
  * Jazz schema for cross-device sync.
@@ -70,8 +71,25 @@ async function caughtUpWithServer(raw: unknown, timeoutMs: number): Promise<void
   }
 }
 
-/** accounts whose root this device created: their blank root is genuinely blank */
-export const createdHere = new Set<string>()
+/**
+ * How long a login waits for the server to show us the account's root.
+ * It has to clear a peer handshake plus one sync round trip on a slow link
+ * (8s was observed to be marginal). It is not stretched further: the
+ * timeout ends in a recoverable "Sync error" (reload / sign out of sync),
+ * so a longer wait only buys a longer "connecting" spinner on a device
+ * that is offline, and a genuinely slow link that needs more than this
+ * also gets another full wait on the reload.
+ */
+const ROOT_WAIT = 15_000
+
+/**
+ * Accounts whose root never arrived. Nothing may be decided or written for
+ * these: this device has no idea what the account's book is.
+ */
+const rootMissing = new Set<string>()
+export function rootNeverArrived(account: string): boolean {
+  return rootMissing.has(account)
+}
 
 export const SeqAccount = co
   .account({
@@ -80,12 +98,38 @@ export const SeqAccount = co
   })
   .withMigration(async (account, creationProps) => {
     if (account.$jazz.has('root')) return
-    // creationProps is only passed while the account is being created; on a
-    // login the root exists somewhere and we must not decide before the
-    // server has shown us the account's content
-    if (!creationProps) await caughtUpWithServer(account.$jazz.raw, 8_000)
-    if (!account.$jazz.has('root')) {
+    // creationProps is only passed while the account is being created. Only
+    // then may we create the root: creating one on a login because the server
+    // was slow would make a second, empty root that wins by last-write-wins
+    // and blanks the book on every device.
+    if (creationProps) {
       account.$jazz.set('root', { projectJson: '', photos: {} })
-      createdHere.add(account.$jazz.id)
+      noteCreatedHere(account.$jazz.id)
+      return
     }
+    await caughtUpWithServer(account.$jazz.raw, ROOT_WAIT)
+    if (account.$jazz.has('root')) return
+
+    // The root did not arrive. We must NOT throw: a rejected migration
+    // rejects `LocalNode.withLoadedAccount`, and the only thing waiting on it
+    // is `contextManager.createContext(props).catch(console.error)` in
+    // jazz-tools' react/provider.tsx — nothing calls `updateContext`, so
+    // `isReady` stays false forever, the provider renders its fallback, the
+    // bridge never mounts, and no status is ever written: the user gets a
+    // permanently disabled Sync button, no message and no way out (the
+    // half-built LocalNode leaks its peer and storage too, and on the
+    // interactive login path the credentials are never stored, so the user is
+    // left anonymous with a generic error).
+    //
+    // So: return normally with no root, and say so out of band. `root` stays
+    // undefined, which already makes every effect in useProjectSync inert
+    // (and `rootNeverArrived` keeps it from treating the account as loaded
+    // at all), SyncProvider keeps the bridge out, and `failed` puts the
+    // toolbar in its existing recoverable state (reload / sign out of sync).
+    // The rest of the patch matches what the error boundary writes, so a
+    // `signedIn` left behind by the bridge that is about to unmount can't
+    // outlive it.
+    console.error('sync: the account root has not arrived from the server; not syncing on this device')
+    rootMissing.add(account.$jazz.id)
+    setSyncStatus({ failed: true, active: false, signedIn: false, offline: false })
   })

@@ -61,15 +61,83 @@ export function useSyncStatus(): SyncStatus {
 
 /** Keys the bridge keeps in localStorage. Jazz keeps its own secret under `jazz-logged-in-secret`. */
 export const SYNC_BASE_PREFIX = 'sequences-sync-base:'
+/** accounts this device created the root for, kept across reloads (see below) */
+export const SYNC_CREATED_PREFIX = 'sequences-sync-created:'
 export const JAZZ_SECRET_KEY = 'jazz-logged-in-secret'
 
-/** Forget every per-account merge base (this-device operations, sign-out from a crash). */
+/**
+ * "This device created the account" comes in two strengths, and mixing them
+ * up costs data:
+ *
+ * - **This page load** (`createdThisSession`, in memory, never persisted).
+ *   The root was created here moments ago, so nothing else can have written
+ *   it and there is nothing cached to be fooled by. Only this may exempt a
+ *   device from the "decide only while the server has reported" gate. A
+ *   persisted mark must never do it: after a reload the cached root can be
+ *   arbitrarily stale (another device moved the book on while we were away),
+ *   and deciding from it silently overwrites the cloud on reconnect.
+ * - **Ever, on this device** (`isCreatedHere`, localStorage). Used only to
+ *   skip the blank-root wait, which is a spinner, not a correctness gate:
+ *   by the time it is consulted the server has already reported.
+ */
+const createdThisSession = new Set<string>()
+
+/** the root for this account was created in this page load */
+export function noteCreatedHere(account: string) {
+  createdThisSession.add(account)
+}
+
+export function wasCreatedThisSession(account: string): boolean {
+  return createdThisSession.has(account)
+}
+
+/**
+ * Remember across reloads that this device created the account. Called only
+ * for an account the user is actually signed in to: Jazz creates an
+ * anonymous account (with creationProps) on every fresh context, so marking
+ * from the migration would leave a key behind on every sign-out.
+ */
+export function persistCreatedHere(account: string) {
+  try {
+    if (localStorage.getItem(SYNC_CREATED_PREFIX + account) !== '1') {
+      localStorage.setItem(SYNC_CREATED_PREFIX + account, '1')
+    }
+  } catch {
+    /* storage unavailable: we just wait out the blank-root wait once more */
+  }
+}
+
+/** did this device ever create this account's root? (blank-root wait only) */
+export function isCreatedHere(account: string): boolean {
+  try {
+    return localStorage.getItem(SYNC_CREATED_PREFIX + account) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * This device left the account (signed out). Whatever it created is over: a
+ * later login in this same page must decide against the server like any
+ * other device. The persisted mark is kept — it only ever skips a spinner.
+ */
+export function forgetCreatedThisSession(account: string) {
+  createdThisSession.delete(account)
+}
+
+/**
+ * Forget every per-account merge base and creator mark (this-device
+ * operations, sign-out from a crash). A device that left the account is no
+ * longer its creator as far as this build is concerned: it must decide
+ * against the server again rather than trust its cached root.
+ */
 export function clearSyncBase() {
+  createdThisSession.clear()
   try {
     const keys: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
-      if (k?.startsWith(SYNC_BASE_PREFIX)) keys.push(k)
+      if (k?.startsWith(SYNC_BASE_PREFIX) || k?.startsWith(SYNC_CREATED_PREFIX)) keys.push(k)
     }
     keys.forEach((k) => localStorage.removeItem(k))
   } catch {

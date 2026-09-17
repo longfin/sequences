@@ -24,11 +24,16 @@ import {
   SyncBridge,
   SyncErrorBoundary,
   SyncProvider,
+  SyncSignOutDialog,
   clearSyncBase,
+  deriveRecoveryPhrase,
+  hasStoredSignIn,
   onSyncEvent,
   postSyncEvent,
+  readStoredCredentials,
   useSyncStatus,
   type ProjectSync,
+  type SignOutPrompt,
 } from './sync'
 import {
   PAGE_RATIOS,
@@ -43,6 +48,11 @@ import {
 
 type View = 'edit' | 'overview' | 'preview'
 
+type ParsedFile = Awaited<ReturnType<typeof parseProjectFile>>
+
+/** a this-device operation held back until the account has been left */
+type PendingOp = { kind: 'reset' } | { kind: 'load'; parsed: ParsedFile }
+
 export default function App() {
   const [project, setProject] = useState<Project | null>(null)
   const [photos, setPhotos] = useState<PhotoMap>(new Map())
@@ -53,6 +63,8 @@ export default function App() {
   const projectFileInput = useRef<HTMLInputElement>(null)
   const syncRef = useRef<ProjectSync | null>(null)
   const [menuSlot, setMenuSlot] = useState<HTMLDivElement | null>(null)
+  const [signOut, setSignOut] = useState<SignOutPrompt | null>(null)
+  const pendingOp = useRef<PendingOp | null>(null)
   const sync = useSyncStatus()
   const [locale, setLocaleState] = useState<Locale>(detectLocale)
 
@@ -315,15 +327,29 @@ export default function App() {
   }
 
   async function handleLoadProject(file: File) {
-    if (!window.confirm(t(syncing ? 'loadConfirmSync' : 'loadConfirm'))) return
+    if (!window.confirm(t(syncingNow() ? 'loadConfirmSync' : 'loadConfirm'))) return
+    let parsed: ParsedFile
     setBusy(t('loadingFile', { done: 0, total: '?' }))
     try {
-      const parsed = await parseProjectFile(file, (done, total) =>
+      parsed = await parseProjectFile(file, (done, total) =>
         setBusy(t('loadingFile', { done, total })),
       )
-      // Loading is a this-device operation. Leave the account (and wait for
-      // it) rather than pushing a wholesale replacement to every other device.
-      if (syncing && !(await leaveSync())) return
+    } catch (err) {
+      console.error(err)
+      alert(t('invalidFile'))
+      return
+    } finally {
+      setBusy(null)
+    }
+    // Loading is a this-device operation. Leave the account (and wait for it)
+    // rather than pushing a wholesale replacement to every other device.
+    if ((await prepareThisDeviceOp({ kind: 'load', parsed })) !== 'go') return
+    await applyLoadedProject(parsed)
+  }
+
+  async function applyLoadedProject(parsed: ParsedFile) {
+    setBusy(t('loadingFile', { done: parsed.photos.length, total: parsed.photos.length }))
+    try {
       // A save made on a thumbnail-only device must not replace originals we hold.
       const existing = new Map<string, PhotoRecord>()
       for (const rec of await db.loadPhotos()) {
@@ -332,6 +358,9 @@ export default function App() {
       const photos = parsed.photos.map((rec) => (!rec.hasOriginal && existing.get(rec.id)) || rec)
       await db.clearAll()
       for (const rec of photos) await db.savePhoto(rec)
+      // written straight away, not through the 300ms debounce: this path can
+      // be followed by an immediate reload
+      await db.saveProject(parsed.project)
       replacePhotoViews(photos)
       setProject(parsed.project)
       postSyncEvent('reload')
@@ -343,14 +372,56 @@ export default function App() {
     }
   }
 
-  /** signed in (even if the root hasn't loaded yet): this-device operations must leave first */
-  const syncing = sync.signedIn || Boolean(syncRef.current?.active)
+  async function runReset() {
+    const fresh = defaultProject()
+    await db.clearAll()
+    await db.saveProject(fresh)
+    replacePhotoViews([])
+    setProject(fresh)
+    postSyncEvent('reload')
+  }
+
+  /**
+   * Signed in — even if the root hasn't loaded yet, and even if the lazy Jazz
+   * chunk hasn't mounted at all. The stored credentials are the only evidence
+   * available in that last window, and without them a Reset or Load started
+   * there would skip the log-out and be pushed over the cloud copy the moment
+   * the bridge arrives.
+   */
+  function syncingNow(): boolean {
+    return sync.signedIn || Boolean(syncRef.current?.active) || (SYNC_ENABLED && hasStoredSignIn())
+  }
+
+  /**
+   * A this-device operation (Reset / Load) must leave the account first.
+   *
+   * - 'go'     — nothing to leave, or we just left: run the operation now.
+   * - 'stop'   — refused; the user has been told why.
+   * - 'dialog' — sync has crashed and can't log out normally, so the sign-out
+   *   dialog is open; `pendingOp` resumes the operation if the user confirms.
+   */
+  async function prepareThisDeviceOp(op: PendingOp): Promise<'go' | 'stop' | 'dialog'> {
+    if (!syncingNow()) return 'go'
+    if (syncRef.current) return (await leaveSync()) ? 'go' : 'stop'
+    if (sync.failed) {
+      // The bridge is gone for good (stale chunk after a deploy, offline first
+      // visit). Reloading can't help, so the way through is to drop the account
+      // on this device — after showing the phrase — and then carry on.
+      const prompt = await openSignOutPrompt('continue')
+      if (!prompt) return 'go'
+      if (prompt.kind === 'blocked') return 'stop'
+      pendingOp.current = op
+      return 'dialog'
+    }
+    console.error('sync: signed in but the bridge is not ready; refusing a this-device operation')
+    alert(t('syncNotReady'))
+    return 'stop'
+  }
 
   /** log out of sync before a this-device operation; false if we are still signed in */
   async function leaveSync(): Promise<boolean> {
     try {
-      if (!syncRef.current) throw new Error('sync not ready')
-      await syncRef.current.logOut()
+      await syncRef.current!.logOut()
       // the next login must not mistake this device's fresh state for "unchanged"
       clearSyncBase()
       // other tabs share the session and the store: they must stop syncing too
@@ -373,41 +444,94 @@ export default function App() {
   )
 
   /**
+   * Open the "the account is about to leave this device" question. Returns the
+   * prompt that was opened, or null when there is no signed-in account to lose
+   * (an anonymous account is never worth a warning: nothing was ever uploaded).
+   */
+  async function openSignOutPrompt(
+    purpose: 'sign-out' | 'continue',
+  ): Promise<SignOutPrompt | null> {
+    if (!hasStoredSignIn()) return null
+    const credentials = readStoredCredentials()
+    if (!credentials) return null
+    let prompt: SignOutPrompt
+    if (!credentials.secretSeed) {
+      // no seed on this device (the account may still be reachable by passkey)
+      prompt = { kind: 'ask', phrase: null, purpose }
+    } else {
+      try {
+        prompt = { kind: 'ask', phrase: await deriveRecoveryPhrase(credentials.secretSeed), purpose }
+      } catch (err) {
+        // A seed is there but we can't turn it into words. Deleting the secret
+        // now would strand the account with nothing written down: refuse.
+        console.error('sync: could not derive the recovery phrase; keeping the account secret', err)
+        prompt = { kind: 'blocked' }
+      }
+    }
+    setSignOut(prompt)
+    return prompt
+  }
+
+  /**
    * The Jazz subtree crashed and the user chose to leave the account on this
    * device. Show the recovery phrase first: without it (or a passkey) the
    * account is unreachable afterwards.
    */
   async function handleSyncFailedLogOut() {
-    let phrase = '—'
+    pendingOp.current = null
+    // never warn about losing an account the user never signed in to
+    if (!(await openSignOutPrompt('sign-out'))) forgetSyncAccount()
+  }
+
+  /** drop the account secret and the merge bases on this device */
+  function dropSyncAccount() {
     try {
-      const raw = localStorage.getItem(JAZZ_SECRET_KEY)
-      const seed: number[] | undefined = raw ? JSON.parse(raw).secretSeed : undefined
-      if (seed) {
-        const [{ entropyToMnemonic }, { wordlist }] = await Promise.all([
-          import('@scure/bip39'),
-          import('@scure/bip39/wordlists/english'),
-        ])
-        phrase = entropyToMnemonic(new Uint8Array(seed), wordlist)
-      }
+      localStorage.removeItem(JAZZ_SECRET_KEY)
     } catch (err) {
-      console.error('sync: could not derive the recovery phrase', err)
+      console.error(err)
     }
-    if (!window.confirm(t('syncFailedLogOutConfirm', { phrase }))) return
-    localStorage.removeItem(JAZZ_SECRET_KEY)
     clearSyncBase()
     postSyncEvent('logout')
+  }
+
+  /** leave the account on this device, then restart */
+  function forgetSyncAccount() {
+    setSignOut(null)
+    pendingOp.current = null
+    dropSyncAccount()
+    location.reload()
+  }
+
+  /**
+   * The user confirmed the sign-out dialog. With no pending operation this is
+   * the plain "leave the account here" case; otherwise sync had crashed and
+   * the Reset / Load that was waiting on the log-out now runs, followed by a
+   * reload (the Jazz chunk is dead, so the page has to restart anyway).
+   */
+  async function confirmSignOut() {
+    const op = pendingOp.current
+    pendingOp.current = null
+    setSignOut(null)
+    if (!op) {
+      forgetSyncAccount()
+      return
+    }
+    dropSyncAccount()
+    try {
+      if (op.kind === 'reset') await runReset()
+      else await applyLoadedProject(op.parsed)
+    } catch (err) {
+      console.error(err)
+    }
     location.reload()
   }
 
   async function handleReset() {
-    if (!window.confirm(t(syncing ? 'resetConfirmSync' : 'resetConfirm'))) return
+    if (!window.confirm(t(syncingNow() ? 'resetConfirmSync' : 'resetConfirm'))) return
     // Reset is a this-device operation; the cloud copy is left untouched.
     // Wait for the logout so the bridge can't pull the cloud copy back in.
-    if (syncing && !(await leaveSync())) return
-    await db.clearAll()
-    replacePhotoViews([])
-    setProject(defaultProject())
-    postSyncEvent('reload')
+    if ((await prepareThisDeviceOp({ kind: 'reset' })) !== 'go') return
+    await runReset()
   }
 
   // ---- export ----
@@ -435,11 +559,14 @@ export default function App() {
     project.spreads.flatMap((s) => [s.left.photoId, s.right.photoId]).filter(Boolean) as string[],
   )
   const trayPhotos = [...photos.values()].filter((p) => !assignedIds.has(p.id))
+  // `incompatible` is not work in progress but a paused state: the cloud book
+  // was written by a newer build, so it reads as a short static line.
   const syncBusy = sync.incompatible
     ? t('syncIncompatible')
     : sync.toUpload + sync.toDownload > 0
       ? t('syncBusy', { up: sync.toUpload, down: sync.toDownload })
       : null
+  const busyPaused = !busy && sync.incompatible
   const remoteDeleted = new Set(sync.remoteDeleted)
 
   return (
@@ -544,12 +671,18 @@ export default function App() {
             {sync.failed ? (
               // a stale chunk after a deploy is the usual cause: reload first,
               // leaving the account is the explicit second choice
-              <>
-                <button className="danger-outline" onClick={() => location.reload()}>
+              <div className="sync-failed">
+                <button
+                  className="danger-outline"
+                  onClick={() => location.reload()}
+                  title={t('syncFailedReloadTitle')}
+                >
                   {t('syncFailedReload')}
-                </button>{' '}
-                <button onClick={handleSyncFailedLogOut}>{t('syncFailedLogOut')}</button>
-              </>
+                </button>
+                <button onClick={handleSyncFailedLogOut} title={t('syncFailedSignOutTitle')}>
+                  {t('syncFailedSignOut')}
+                </button>
+              </div>
             ) : (
               !sync.loaded && <button disabled>{t('sync')}</button>
             )}
@@ -557,9 +690,12 @@ export default function App() {
         )}
         <div className="toolbar-spacer" />
         {(busy || syncBusy) && (
-          <span className="busy">
+          <span
+            className={`busy ${busyPaused ? 'paused' : ''}`}
+            title={busyPaused ? t('syncIncompatibleTitle') : undefined}
+          >
             <span className="busy-dot" />
-            {busy ?? syncBusy}
+            <span className="busy-label">{busy ?? syncBusy}</span>
           </span>
         )}
         <div className="seg" role="group" aria-label={t('viewSwitch')}>
@@ -626,6 +762,17 @@ export default function App() {
         />
       )}
     </div>
+    {signOut && (
+      <SyncSignOutDialog
+        prompt={signOut}
+        onConfirm={confirmSignOut}
+        onCancel={() => {
+          // nothing has changed: the pending Reset / Load is dropped too
+          pendingOp.current = null
+          setSignOut(null)
+        }}
+      />
+    )}
     </I18nContext.Provider>
   )
 }

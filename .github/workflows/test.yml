@@ -1,8 +1,17 @@
 name: Test
 
+# A PR push used to start two runs (pull_request + push on the branch); the
+# merge to main then started a third through the deploy workflow. Branch
+# pushes are covered by their PR, so only PRs and main are watched here.
 on:
   pull_request:
   push:
+    branches: [main]
+
+# One run per ref: a new push supersedes the one still running on it.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

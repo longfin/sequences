@@ -55,6 +55,19 @@ export class Device {
 
   private async load(page: Page) {
     await page.goto('/')
+    await this.ready(page)
+  }
+
+  /** reload the page in place (the device keeps its stores and its credentials) */
+  async reload(page: Page = this.page) {
+    // App writes the project to IndexedDB 300ms after the last edit; a reload
+    // inside that window comes back with the previously saved book
+    await page.waitForTimeout(500)
+    await page.reload()
+    await this.ready(page)
+  }
+
+  private async ready(page: Page) {
     await page.locator('.spread-card').first().waitFor()
     // the Sync button is a disabled placeholder until the lazy Jazz chunk has
     // mounted; on a cold dev server that compile can take seconds, and it must
@@ -81,6 +94,29 @@ export class Device {
   /** cut / restore the network (the app origin keeps working through Playwright's own channel) */
   async offline(on: boolean) {
     await this.context.setOffline(on)
+  }
+
+  private syncBlocked = false
+  private syncRouted = false
+
+  /**
+   * Make only the sync server unreachable: every new WebSocket to it is
+   * closed before it opens (the client then reconnects with backoff), while
+   * the app origin stays reachable — so the page can be reloaded "offline".
+   * Sockets already open are not touched; cut them with `offline` first.
+   */
+  async blockSync(on: boolean) {
+    this.syncBlocked = on
+    if (this.syncRouted) return
+    this.syncRouted = true
+    const app = new URL(this.page.url()).origin
+    await this.context.routeWebSocket(
+      (url) => url.origin !== app,
+      (ws) => {
+        if (this.syncBlocked) ws.close({ code: 1001, reason: 'e2e: sync server unreachable' })
+        else ws.connectToServer()
+      },
+    )
   }
 
   // ---- photos ----
@@ -151,6 +187,33 @@ export class Device {
     const print = page.locator('.tray-photo', { has: page.locator(`img[alt="${name}.jpg"]`) })
     await print.hover()
     await print.locator('.tray-delete').click()
+  }
+
+  /**
+   * Every photo record in this device's IndexedDB. `hasOriginal === false`
+   * marks a copy that arrived through sync: originals never leave the device
+   * that imported them.
+   */
+  async photoRecords(page: Page = this.page): Promise<{ name: string; hasOriginal: boolean | undefined }[]> {
+    return page.evaluate(
+      () =>
+        new Promise<{ name: string; hasOriginal: boolean | undefined }[]>((resolve, reject) => {
+          const open = indexedDB.open('sequences')
+          open.onerror = () => reject(open.error)
+          open.onsuccess = () => {
+            // `transaction()` throws synchronously (no such store, database
+            // closing); without the catch the promise would never settle
+            try {
+              const req = open.result.transaction('photos').objectStore('photos').getAll()
+              req.onerror = () => reject(req.error)
+              req.onsuccess = () =>
+                resolve(req.result.map((r: { name: string; hasOriginal?: boolean }) => ({ name: r.name, hasOriginal: r.hasOriginal })))
+            } catch (err) {
+              reject(err)
+            }
+          }
+        }),
+    )
   }
 
   /** the B&W toggle: a harmless project edit */

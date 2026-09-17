@@ -80,7 +80,9 @@ export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onD
             <img
               src={p.thumbUrl}
               alt={p.name}
-              title={p.name}
+              // the chip is only ~50px wide on a portrait print: the print
+              // itself carries the full wording
+              title={remoteDeleted?.has(p.id) ? `${p.name} — ${t('remoteDeletedOne')}` : p.name}
               draggable
               onDragStart={(e) => {
                 setDrag({ type: 'photo', photoId: p.id, from: 'tray' })

@@ -1,4 +1,5 @@
 import { Component, lazy, type ErrorInfo, type ReactNode } from 'react'
+import { quarantineCorruptCredentials, repairLegacyCredentials } from './credentials'
 import { setSyncStatus } from './status'
 
 /**
@@ -13,10 +14,23 @@ const PEER: string = import.meta.env.VITE_JAZZ_SYNC_PEER ?? ''
 
 export const SYNC_ENABLED = API_KEY.length > 0 || PEER.length > 0
 
+/**
+ * Before anything Jazz-shaped mounts: a stored secret this build can't read
+ * would leave the provider forever un-ready (Sync button disabled, no way
+ * out). Move it aside and start signed out instead; a readable secret in the
+ * older `secret` shape is rewritten to the current one, since jazz-tools
+ * reads it before it would migrate it. Module scope, so it runs once on
+ * import — App imports this module before it renders.
+ */
+if (SYNC_ENABLED && !quarantineCorruptCredentials()) repairLegacyCredentials()
+
 export const SyncProvider = lazy(() => import('./jazz').then((m) => ({ default: m.SyncProvider })))
 export const SyncBridge = lazy(() => import('./jazz').then((m) => ({ default: m.SyncBridge })))
 
 export { JAZZ_SECRET_KEY, clearSyncBase, onSyncEvent, postSyncEvent, useSyncStatus } from './status'
+export { deriveRecoveryPhrase, hasStoredSignIn, readStoredCredentials } from './credentials'
+export { SyncSignOutDialog } from './SyncSignOutDialog'
+export type { SignOutPrompt } from './SyncSignOutDialog'
 export type { ProjectSync } from './useProjectSync'
 
 /**

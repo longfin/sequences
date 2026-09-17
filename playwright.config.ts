@@ -12,8 +12,11 @@ import { defineConfig } from '@playwright/test'
  * can end up naming a different one than the context that keeps running.
  * Production has no double effects, and that is what ships.
  */
-const SYNC_PORT = 4210
-const APP_PORT = 5177
+// Both ports are overridable: the defaults only need to be free on the
+// machine running the suite, and a developer may already have something on
+// them (`E2E_PORT=5299 E2E_SYNC_PORT=4299 npx playwright test`).
+const SYNC_PORT = Number(process.env.E2E_SYNC_PORT || 4271)
+const APP_PORT = Number(process.env.E2E_PORT || 5271)
 const OUT_DIR = 'dist-e2e'
 
 export default defineConfig({
