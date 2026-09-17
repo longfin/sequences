@@ -6,15 +6,19 @@ import type { PhotoView } from '../photoStore'
 
 interface Props {
   photos: PhotoView[]
+  /** prints another device deleted; kept here because this device holds the original */
+  remoteDeleted?: Set<string>
   onImportFiles: (files: FileList | File[]) => void
   onDropFromSlot: () => void
   onDeletePhoto: (id: string) => void
 }
 
-export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: Props) {
+export function Tray({ photos, remoteDeleted, onImportFiles, onDropFromSlot, onDeletePhoto }: Props) {
   const { t } = useI18n()
   const [over, setOver] = useState(false)
+  const [explain, setExplain] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+  const anyRemoteDeleted = photos.some((p) => remoteDeleted?.has(p.id))
 
   function handleDragOver(e: DragEvent) {
     const drag = getDrag()
@@ -50,6 +54,12 @@ export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: P
           {t('trayLabel')} <em>{photos.length}</em>
         </span>
         <button onClick={() => fileInput.current?.click()}>{t('addPhotos')}</button>
+        {anyRemoteDeleted && (
+          // works without hover, so it reads on the iPad too
+          <button className="tray-note" onClick={() => setExplain((s) => !s)} aria-expanded={explain}>
+            {t('remoteDeletedNote')}
+          </button>
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -62,6 +72,7 @@ export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: P
           }}
         />
       </div>
+      {explain && anyRemoteDeleted && <p className="tray-explain">{t('remoteDeletedTitle')}</p>}
       <div className="tray-photos">
         {photos.length === 0 && <p className="tray-empty">{t('trayEmpty')}</p>}
         {photos.map((p) => (
@@ -69,7 +80,9 @@ export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: P
             <img
               src={p.thumbUrl}
               alt={p.name}
-              title={p.name}
+              // the chip is only ~50px wide on a portrait print: the print
+              // itself carries the full wording
+              title={remoteDeleted?.has(p.id) ? `${p.name} — ${t('remoteDeletedOne')}` : p.name}
               draggable
               onDragStart={(e) => {
                 setDrag({ type: 'photo', photoId: p.id, from: 'tray' })
@@ -81,6 +94,7 @@ export function Tray({ photos, onImportFiles, onDropFromSlot, onDeletePhoto }: P
             <button className="tray-delete" title={t('deletePhoto')} onClick={() => onDeletePhoto(p.id)}>
               ×
             </button>
+            {remoteDeleted?.has(p.id) && <span className="tray-chip">{t('remoteDeleted')}</span>}
           </div>
         ))}
       </div>

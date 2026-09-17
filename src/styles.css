@@ -86,8 +86,12 @@ button {
 
 /* ---------- toolbar ---------- */
 
+/* Wraps rather than overflows: at narrow widths (and in the sync error state,
+   which adds two buttons) the row can't hold everything on one line. */
 .toolbar {
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 10px 20px;
@@ -110,23 +114,43 @@ button {
 
 .toolbar-spacer {
   flex: 1;
+  min-width: 0;
 }
 
 .busy {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   color: var(--accent);
   font-family: var(--mono);
   font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* a long line (a paused-sync notice) truncates instead of pushing the
+   toolbar past the viewport */
+.busy-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .busy-dot {
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
   animation: pulse 1.1s ease-in-out infinite;
+}
+
+/* not work in progress but a paused state (the cloud book is newer than this
+   build): the dot goes hollow and stops breathing */
+.busy.paused .busy-dot {
+  animation: none;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 @keyframes pulse {
@@ -212,6 +236,228 @@ button {
 
 .menu button.danger {
   color: var(--danger);
+}
+
+/* ---------- sync popover ---------- */
+
+.sync-menu {
+  left: auto;
+  right: 0;
+  width: 280px;
+}
+
+.sync-note {
+  padding: 8px 11px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.sync-phrase {
+  margin: 4px 6px 6px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.sync-error {
+  padding: 6px 11px 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+/* ---------- sync merge dialog ---------- */
+
+.sync-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+}
+
+.sync-dialog {
+  width: min(420px, calc(100vw - 32px));
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 22px 22px 18px;
+  box-shadow: var(--shadow-spread);
+}
+
+.sync-dialog h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--paper);
+  margin-bottom: 8px;
+}
+
+.sync-dialog p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.sync-merge-sides {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 14px 0 18px;
+  font-size: 13px;
+}
+
+.sync-merge-sides dt {
+  color: var(--muted);
+}
+
+.sync-merge-sides dd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.sync-dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-dialog-actions button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 13px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sync-dialog-actions button:hover {
+  border-color: var(--muted);
+  background: var(--bg);
+}
+
+.sync-dialog-actions button.danger {
+  color: var(--danger);
+  border-color: rgba(224, 106, 90, 0.5);
+}
+
+.sync-dialog-actions button.danger:hover {
+  border-color: var(--danger);
+  background: rgba(224, 106, 90, 0.12);
+}
+
+/* the recovery phrase inside a dialog: full width, selectable, with Copy */
+.sync-dialog .sync-phrase {
+  display: block;
+  width: 100%;
+  margin: 14px 0 6px;
+}
+
+.sync-dialog .sync-error {
+  padding: 10px 0 0;
+  margin-bottom: 14px;
+  line-height: 1.45;
+}
+
+.sync-dialog-copy {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.sync-dialog-copy button {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.sync-dialog-copy button:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+/* A print kept here because the original lives here, after another device
+   deleted it. It has to fit the narrowest work print (a 4:5 portrait at the
+   tray's 76px card height leaves ~50px of text room), so: 9px mono, tight
+   padding, no letter-spacing. The full wording lives in the tray note. */
+.tray-chip {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  max-width: calc(100% - 4px);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(22, 22, 24, 0.88);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* a quiet text toggle, not a bordered button: beat `.tray-header button` */
+.tray-header button.tray-note {
+  margin-left: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.tray-header button.tray-note:hover {
+  background: none;
+  border-color: transparent;
+  color: var(--text);
+}
+
+.tray-explain {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+.toolbar button.danger-outline {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* the two ways out of a crashed sync subtree: they wrap rather than overflow */
+.sync-failed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.toolbar .sync-failed button {
+  padding: 6px 11px;
+  font-size: 12.5px;
 }
 
 .menu button.danger:hover {

@@ -32,6 +32,7 @@ export async function importFile(file: File): Promise<PhotoRecord> {
     height,
     blob: file,
     thumb,
+    hasOriginal: true,
   }
 }
 

@@ -33,19 +33,49 @@ export async function loadPhotos(): Promise<PhotoRecord[]> {
   return db.getAll('photos')
 }
 
+// Writes resolve on transaction completion (not just request success) so
+// that another tab reading right after sees the committed state.
+
 export async function savePhoto(photo: PhotoRecord): Promise<void> {
   const db = await getDB()
-  await db.put('photos', photo)
+  const tx = db.transaction('photos', 'readwrite')
+  await tx.store.put(photo)
+  await tx.done
 }
 
 export async function deletePhoto(id: string): Promise<void> {
   const db = await getDB()
-  await db.delete('photos', id)
+  const tx = db.transaction('photos', 'readwrite')
+  await tx.store.delete(id)
+  await tx.done
+}
+
+/**
+ * Remove the record only if it is a thumbnail-only copy, checked inside the
+ * same transaction. Used when another device deleted the photo: an original
+ * that another tab may have just (re)written must never be swept away.
+ * Returns whether a record was removed.
+ */
+export async function deletePhotoIfThumbOnly(id: string): Promise<boolean> {
+  const db = await getDB()
+  const tx = db.transaction('photos', 'readwrite')
+  const rec: PhotoRecord | undefined = await tx.store.get(id)
+  const remove = !!rec && rec.hasOriginal === false
+  if (remove) await tx.store.delete(id)
+  await tx.done
+  return remove
 }
 
 export async function clearAll(): Promise<void> {
   const db = await getDB()
-  await Promise.all([db.clear('photos'), db.clear('project')])
+  const tx = db.transaction(['photos', 'project'], 'readwrite')
+  await Promise.all([tx.objectStore('photos').clear(), tx.objectStore('project').clear()])
+  await tx.done
+}
+
+export async function getPhoto(id: string): Promise<PhotoRecord | undefined> {
+  const db = await getDB()
+  return db.get('photos', id)
 }
 
 export async function getPhotoBlob(id: string): Promise<Blob | undefined> {

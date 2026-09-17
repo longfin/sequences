@@ -26,8 +26,45 @@ export interface PhotoMeta {
 }
 
 export interface PhotoRecord extends PhotoMeta {
+  /** the original file, or the thumbnail again when `hasOriginal` is false */
   blob: Blob
   thumb: Blob
+  /**
+   * false for photos that arrived through sync: only the ≤600px thumbnail
+   * exists on this device. Records written before this flag existed are
+   * treated as originals (`hasOriginal !== false`).
+   */
+  hasOriginal: boolean
+}
+
+export function placedPhotoIds(project: Project): string[] {
+  return project.spreads.flatMap((s) => [s.left.photoId, s.right.photoId]).filter(Boolean) as string[]
+}
+
+function isPage(x: unknown): x is PageState {
+  if (!x || typeof x !== 'object') return false
+  const p = x as Record<string, unknown>
+  return (
+    (p.photoId === null || typeof p.photoId === 'string') &&
+    (p.layout === 'full' || p.layout === 'margin')
+  )
+}
+
+/** Structural check for project documents coming from files or sync. */
+export function isValidProject(x: unknown): x is Project {
+  if (!x || typeof x !== 'object') return false
+  const p = x as Record<string, unknown>
+  if (typeof p.pageRatio !== 'number' || !Number.isFinite(p.pageRatio) || p.pageRatio <= 0) return false
+  if (typeof p.grayscale !== 'boolean') return false
+  if (!Array.isArray(p.spreads)) return false
+  return p.spreads.every(
+    (s: unknown) =>
+      !!s &&
+      typeof s === 'object' &&
+      typeof (s as Spread).id === 'string' &&
+      isPage((s as Spread).left) &&
+      isPage((s as Spread).right),
+  )
 }
 
 export type DragPayload =

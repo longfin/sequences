@@ -8,19 +8,24 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test"
   },
   "dependencies": {
+    "@scure/bip39": "^1.6.0",
     "idb": "^8.0.0",
+    "jazz-tools": "^0.20.19",
     "jspdf": "^2.5.2",
     "page-flip": "^2.0.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "jazz-run": "^0.20.19",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
   }

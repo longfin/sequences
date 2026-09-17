@@ -7,7 +7,10 @@ deciding which photographs go where, long before layout software. Upload
 photos into a tray, drag them onto book spreads, study the pairings, and flip
 through the result like a printed dummy.
 
-Everything stays in your browser (IndexedDB). No server, no uploads.
+Everything stays in your browser (IndexedDB). No server of its own, no
+account required. If you want the same book on your iPad, you can sign in
+to sync the sequence and thumbnails between your devices; originals still
+never leave the device that imported them.
 
 **Try it now → [sequences.kelupus.com](https://sequences.kelupus.com/)**
 
@@ -54,7 +57,13 @@ npm install
 npm run dev
 ```
 
-Built with React + TypeScript + Vite. Photos never leave the browser.
+Built with React + TypeScript + Vite. Original photos never leave the browser.
+
+Sync is off unless the build has a `VITE_JAZZ_API_KEY` (a [Jazz](https://jazz.tools)
+Cloud key) or `VITE_JAZZ_SYNC_PEER` (your own sync server; the test suite uses a
+local one). With it, a "Sync" button appears; nothing is uploaded until you
+sign in with a passkey or a recovery phrase, and only the sequence and ≤600px
+thumbnails are synced.
 
 ## License
 
